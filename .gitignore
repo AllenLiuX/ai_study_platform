@@ -1,0 +1,51 @@
+# =============================================================================
+# 学生学习驾驶舱 - 根目录 .gitignore
+# =============================================================================
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 日志
+*.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+api/.venv/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo/
+.vercel/
+*.tsbuildinfo
+web/node_modules/
+web/.next/
+
+# OS
+Thumbs.db
+
+# Supabase 本地
+supabase/.branches
+supabase/.temp

@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* 主色: indigo-600 #4f46e5 -> HSL 239 84% 58% */
+    --background: 250 100% 99%;
+    --foreground: 230 25% 18%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 230 25% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 230 25% 18%;
+
+    --primary: 239 84% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 33% 96%;
+    --secondary-foreground: 235 25% 25%;
+
+    /* accent: amber-500 #f59e0b */
+    --accent: 38 92% 50%;
+    --accent-foreground: 30 80% 12%;
+
+    --muted: 240 20% 95%;
+    --muted-foreground: 230 12% 45%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 230 30% 90%;
+    --input: 230 30% 92%;
+    --ring: 239 84% 58%;
+
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 232 25% 8%;
+    --foreground: 230 20% 95%;
+
+    --card: 232 25% 10%;
+    --card-foreground: 230 20% 95%;
+
+    --popover: 232 25% 10%;
+    --popover-foreground: 230 20% 95%;
+
+    --primary: 239 90% 70%;
+    --primary-foreground: 230 25% 10%;
+
+    --secondary: 232 20% 18%;
+    --secondary-foreground: 230 20% 92%;
+
+    --accent: 38 92% 60%;
+    --accent-foreground: 30 80% 12%;
+
+    --muted: 232 20% 16%;
+    --muted-foreground: 230 12% 65%;
+
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 232 20% 20%;
+    --input: 232 20% 20%;
+    --ring: 239 84% 65%;
+  }
+
+  * {
+    @apply border-border;
+  }
+  html,
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer utilities {
+  .bg-app-gradient {
+    background-image: radial-gradient(
+        circle at 15% 0%,
+        rgba(99, 102, 241, 0.08),
+        transparent 35%
+      ),
+      radial-gradient(
+        circle at 85% 20%,
+        rgba(245, 158, 11, 0.08),
+        transparent 40%
+      ),
+      linear-gradient(180deg, #fafaff 0%, #f4f4fb 100%);
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(99, 102, 241, 0.25) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(99, 102, 241, 0.25);
+    border-radius: 9999px;
+  }
+}
