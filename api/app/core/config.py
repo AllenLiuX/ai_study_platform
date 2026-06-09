@@ -43,6 +43,11 @@ class Settings(BaseSettings):
         default="http://localhost:3000,http://127.0.0.1:3000",
         alias="BACKEND_CORS_ORIGINS",
     )
+    # 用于匹配 Vercel preview / 通配子域名等动态 origin,默认空 = 不启用
+    # 例:^https://ai-study-platform[a-z0-9-]*\.vercel\.app$
+    backend_cors_origin_regex: str = Field(
+        default="", alias="BACKEND_CORS_ORIGIN_REGEX"
+    )
     backend_port: int = Field(default=8000, alias="BACKEND_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
@@ -53,6 +58,10 @@ class Settings(BaseSettings):
             for origin in self.backend_cors_origins.split(",")
             if origin.strip()
         ]
+
+    @property
+    def cors_origin_regex(self) -> str | None:
+        return self.backend_cors_origin_regex.strip() or None
 
     @property
     def supabase_configured(self) -> bool:

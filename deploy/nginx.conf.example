@@ -1,0 +1,66 @@
+# =============================================================================
+# 学生学习驾驶舱后端 nginx 反向代理示例
+#
+# 关键点 (SSE 流式响应):
+#   - proxy_buffering off:不能让 nginx 攒着不发,否则前端看不到流式 delta
+#   - proxy_cache off:别缓存 SSE
+#   - X-Accel-Buffering no:进一步保证不被任何中间层缓冲
+#   - proxy_read_timeout 5min:长流式回答 / RAG 检索需要时间
+#   - proxy_http_version 1.1 + Connection "":让 keep-alive 在 upstream 工作
+#
+# HTTPS:用 Let's Encrypt:certbot --nginx -d api.yourdomain.com
+# =============================================================================
+
+# HTTP → HTTPS 强跳
+server {
+    listen 80;
+    server_name api.yourdomain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.yourdomain.com;
+
+    # ---- TLS (Let's Encrypt 自动维护) ----
+    ssl_certificate     /etc/letsencrypt/live/api.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.yourdomain.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    # ---- 安全头 ----
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # ---- 资料 PDF 上传上限 ----
+    client_max_body_size 30M;
+
+    # ---- 反代到本地 uvicorn ----
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+
+        # HTTP/1.1 + keep-alive (uvicorn upstream)
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        # SSE 流式必备
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_set_header X-Accel-Buffering no;
+        proxy_read_timeout  300s;
+        proxy_send_timeout  300s;
+
+        # 透传客户端 IP / 协议
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 健康检查可以单独暴露,方便监控不走完整链路
+    location = /health {
+        proxy_pass http://127.0.0.1:8000/health;
+        access_log off;
+    }
+}

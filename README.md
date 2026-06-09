@@ -252,6 +252,65 @@ python ../scripts/seed_platform_materials.py
 
 ---
 
+## 生产部署
+
+部署模式: **前端 Vercel + 后端自有服务器 (uvicorn + nginx + systemd)**。
+
+完整步骤见 [deploy/README.md](deploy/README.md),20 分钟跑通。简要 checklist:
+
+### 后端 (你自己的 Linux 服务器)
+
+```bash
+# 1. clone + 配 .env (BACKEND_CORS_ORIGINS 加上 Vercel 的 URL,SUPABASE_* / OPENAI_API_KEY 填真值)
+# 2. 跑一次确认能起
+./deploy/start_prod.sh
+# 3. 装 systemd 守护
+sudo cp deploy/student-coach-api.service.example /etc/systemd/system/student-coach-api.service
+sudo systemctl enable --now student-coach-api
+# 4. nginx 反代 + HTTPS
+sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/student-coach-api
+sudo ln -s /etc/nginx/sites-available/student-coach-api /etc/nginx/sites-enabled/
+sudo certbot --nginx -d api.yourdomain.com
+```
+
+> **SSE 关键**:`nginx.conf.example` 里的 `proxy_buffering off` / `X-Accel-Buffering no` / `proxy_read_timeout 300s` 务必保留 — 否则前端 chat 不流式,得等整个回答完才一次性出现。
+
+### 前端 (Vercel)
+
+进 Vercel Project → Settings → Environment Variables,加三个变量(Production + Preview 都要勾):
+
+| 变量名 | 值 |
+| --- | --- |
+| `NEXT_PUBLIC_API_BASE_URL` | `https://api.yourdomain.com` |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://xxx.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon (publishable) key |
+
+**改完务必触发 Redeploy** — Next.js 的 `NEXT_PUBLIC_*` 是 build time 注入,旧 build 拿不到新值。
+
+后端 `.env` 还需要配:
+
+```bash
+# 允许 Vercel production URL
+BACKEND_CORS_ORIGINS=https://your-app.vercel.app
+# (可选) 允许所有 Vercel preview deployment
+BACKEND_CORS_ORIGIN_REGEX=^https://your-app[a-z0-9-]*\.vercel\.app$
+```
+
+### 部署自检
+
+```bash
+# 1. 后端可达
+curl https://api.yourdomain.com/health/config
+
+# 2. CORS 已放行 Vercel
+curl -I -H "Origin: https://your-app.vercel.app" https://api.yourdomain.com/health/config
+# 响应头里应该有 access-control-allow-origin: https://your-app.vercel.app
+
+# 3. 浏览器访问 https://your-app.vercel.app/dashboard,DevTools Network 看 /api/student/dashboard = 200
+```
+
+---
+
 ## 验收清单
 
 打开 [http://localhost:3000](http://localhost:3000),按顺序完成以下流程:

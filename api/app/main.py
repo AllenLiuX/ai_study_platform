@@ -27,13 +27,17 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    cors_kwargs: dict = {
+        "allow_origins": settings.cors_origins_list,
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+    if settings.cors_origin_regex:
+        # FastAPI 的 CORSMiddleware 同时支持 allow_origins 和 allow_origin_regex
+        # 任一匹配即放行;用于 Vercel preview 这种 *.vercel.app 动态域名
+        cors_kwargs["allow_origin_regex"] = settings.cors_origin_regex
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
 
     app.include_router(health_route.router)
     app.include_router(students_route.router, prefix="/api")

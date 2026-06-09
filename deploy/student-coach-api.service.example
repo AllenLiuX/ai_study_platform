@@ -1,0 +1,40 @@
+# =============================================================================
+# systemd unit:让 student-coach-api 开机自启 + 失败自动重启
+#
+# 安装步骤:
+#   1. 把仓库 clone 到 /srv/student_coach (任意路径,记得改下面 WorkingDirectory)
+#   2. 创建 deploy 用户:sudo useradd -m -s /bin/bash deploy && sudo chown -R deploy:deploy /srv/student_coach
+#   3. 切到 deploy 跑一次 ./deploy/start_prod.sh 确认能起 (Ctrl+C 退出)
+#   4. 复制本文件:
+#        sudo cp deploy/student-coach-api.service.example /etc/systemd/system/student-coach-api.service
+#        # 编辑里面的 WorkingDirectory / User / EnvironmentFile
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now student-coach-api
+#        sudo systemctl status student-coach-api
+#        sudo journalctl -u student-coach-api -f
+# =============================================================================
+
+[Unit]
+Description=Student Coach API (FastAPI + uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/srv/student_coach
+EnvironmentFile=/srv/student_coach/.env
+# 不要让 start_prod.sh 跑 pip install (生产希望部署前装好);如果你接受每次启动
+# 都跑一次 pip install,这里直接用脚本即可
+ExecStart=/bin/bash /srv/student_coach/deploy/start_prod.sh
+Restart=always
+RestartSec=3
+# 日志走 journald,journalctl -u student-coach-api 看
+StandardOutput=journal
+StandardError=journal
+# 优雅停止时间
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
