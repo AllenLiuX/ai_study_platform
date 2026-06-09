@@ -13,7 +13,38 @@ import type {
   Subject,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// -----------------------------------------------------------------------------
+// 后端 URL 解析:支持 local <-> online 一键切换
+//
+// 优先级:
+//   1. NEXT_PUBLIC_API_MODE = "local" | "online" -> 用内置 preset (推荐)
+//   2. NEXT_PUBLIC_API_BASE_URL -> 完全自定义 URL (向后兼容/逃生口)
+//   3. 默认 "http://localhost:8000" (本地开发兜底)
+//
+// 使用方式:
+//   - 本地开发打本地后端: 不设或 NEXT_PUBLIC_API_MODE=local
+//   - 本地开发打线上后端: NEXT_PUBLIC_API_MODE=online
+//   - Vercel 生产: NEXT_PUBLIC_API_MODE=online (build 时注入)
+//
+// 注意 NEXT_PUBLIC_* 在 Next.js 是 build-time 注入,改完要重新 build。
+// -----------------------------------------------------------------------------
+const API_PRESETS: Record<string, string> = {
+  local: "http://localhost:8000",
+  online: "https://aico-music.com:5443",
+};
+
+function resolveApiBase(): string {
+  const mode = process.env.NEXT_PUBLIC_API_MODE?.toLowerCase();
+  if (mode && API_PRESETS[mode]) return API_PRESETS[mode];
+  return process.env.NEXT_PUBLIC_API_BASE_URL ?? API_PRESETS.local;
+}
+
+const API_BASE = resolveApiBase();
+
+/** 给外部 (调试/UI badge) 暴露当前实际后端地址 */
+export function getApiBase(): string {
+  return API_BASE;
+}
 
 async function getAccessToken(): Promise<string | null> {
   const supabase = createSupabaseBrowserClient();
