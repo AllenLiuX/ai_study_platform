@@ -12,6 +12,7 @@ from ..agents.registry import AgentConfig, get_agent
 from ..agents.runtime import stream_reply
 from ..db import repos
 from ..schemas.chat import CreateSessionRequest
+from .retrieval import RetrievedChunk, format_context, retrieve_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -64,53 +65,109 @@ def list_sessions(user_id: str) -> list[dict]:
     return repos.list_sessions(user_id)
 
 
+def _citation_payload(chunks: list[RetrievedChunk]) -> list[dict]:
+    return [
+        {
+            "material_id": c.material_id,
+            "material_title": c.material_title,
+            "chunk_index": c.chunk_index,
+            "similarity": round(c.similarity, 4),
+            "snippet": c.content[:160],
+        }
+        for c in chunks
+    ]
+
+
 async def stream_assistant_reply(
     *,
     session_id: str,
     user_id: str,
     user_content: str,
+    material_ids: list[str] | None,
     student_profile: dict | None,
 ) -> AsyncIterator[str]:
     """流式生成 assistant 回复。
 
-    yield 出去的是 SSE event 字符串(已经包含 `data: ...\\n\\n`)。
+    yield 出去的是 SSE event 字符串(已经包含 `event: ...\\ndata: ...\\n\\n`)。
 
     流程:
     1. 校验会话归属
-    2. 落库 user message
+    2. 落库 user message (在 metadata.material_ids 中标注引用了哪些资料)
     3. 取历史
-    4. 调 LLM stream
-    5. 累计完整文本后落库 assistant message
+    4. 若提供 material_ids,做 RAG 召回 → 发送 citations 事件
+    5. 调 LLM stream
+    6. 累计完整文本后落库 assistant message,citations 写入 metadata
     """
     session = get_session_or_404(session_id, user_id)
     agent = get_agent(session["agent_type"])
 
+    user_meta: dict = {}
+    if material_ids:
+        user_meta["material_ids"] = material_ids
     repos.insert_message(
-        session_id=session_id, role="user", content=user_content
+        session_id=session_id,
+        role="user",
+        content=user_content,
+        metadata=user_meta or None,
     )
 
     history = repos.list_messages(session_id)
 
+    assistant_text_parts: list[str] = []
+    citations: list[RetrievedChunk] = []
     try:
-        assistant_text_parts: list[str] = []
-        # 首先发送一个 ready event,让前端知道流已建立
         yield _sse("ready", {"agent_type": agent.agent_type})
 
+        rag_context: str | None = None
+        if material_ids is not None and len(material_ids) > 0:
+            try:
+                citations = await retrieve_chunks(
+                    query=user_content,
+                    owner_id=user_id,
+                    material_ids=material_ids,
+                    top_k=5,
+                )
+            except Exception as exc:
+                logger.warning("RAG retrieval failed: %s", exc)
+                yield _sse(
+                    "warning",
+                    {"message": f"资料检索失败,本次将基于通识知识回答 ({exc})"},
+                )
+                citations = []
+
+            if citations:
+                rag_context = format_context(citations)
+                yield _sse("citations", {"items": _citation_payload(citations)})
+            else:
+                yield _sse(
+                    "warning",
+                    {"message": "未在选中的资料里找到与问题相关的内容,本次将基于通识知识回答"},
+                )
+
         async for delta in stream_reply(
-            agent=agent, history=history, student_profile=student_profile
+            agent=agent,
+            history=history,
+            student_profile=student_profile,
+            rag_context=rag_context,
         ):
             assistant_text_parts.append(delta)
             yield _sse("delta", {"text": delta})
 
         full_text = "".join(assistant_text_parts).strip()
         if full_text:
+            assistant_meta: dict = {
+                "model_tier": agent.tier.value,
+                "agent_type": agent.agent_type,
+            }
+            if citations:
+                assistant_meta["citations"] = _citation_payload(citations)
             repos.insert_message(
                 session_id=session_id,
                 role="assistant",
                 content=full_text,
-                metadata={"model_tier": agent.tier.value},
+                metadata=assistant_meta,
             )
-        # 自动补 session title:用第一条 user message 的前 20 个字
+
         if not session.get("title") or session.get("title", "").endswith("的对话"):
             short_title = user_content.strip().splitlines()[0][:20]
             if short_title:
@@ -120,10 +177,12 @@ async def stream_assistant_reply(
         else:
             repos.touch_session(session_id)
 
-        yield _sse("done", {"length": len(full_text)})
+        yield _sse(
+            "done",
+            {"length": len(full_text), "citation_count": len(citations)},
+        )
     except Exception as exc:
         logger.exception("LLM stream failed")
-        # 把已经收到的部分也落库,避免学生看到一段回复刷新就丢
         partial = "".join(assistant_text_parts).strip()
         if partial:
             repos.insert_message(

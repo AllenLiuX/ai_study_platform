@@ -66,10 +66,12 @@ async def send_message(
     """以 SSE 流式返回 assistant 回复。
 
     事件类型:
-    - ready: {"agent_type": "..."}
-    - delta: {"text": "..."}  增量文本片段
-    - done: {"length": N}
-    - error: {"message": "..."}
+    - ready:     {"agent_type": "..."}
+    - citations: {"items": [{material_id, material_title, chunk_index, similarity, snippet}, ...]}
+                 在有 RAG 召回时,delta 之前先发一次,前端立即展示引用条
+    - delta:     {"text": "..."}  增量文本片段
+    - done:      {"length": N, "citation_count": M}
+    - error:     {"message": "..."}
     """
     profile = repos.get_profile(user.id)
     return StreamingResponse(
@@ -77,6 +79,7 @@ async def send_message(
             session_id=session_id,
             user_id=user.id,
             user_content=payload.content,
+            material_ids=payload.material_ids,
             student_profile=profile,
         ),
         media_type="text/event-stream",

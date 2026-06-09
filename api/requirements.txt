@@ -8,3 +8,6 @@ openai>=1.51.0
 supabase>=2.8.0
 PyJWT[crypto]>=2.9.0
 python-multipart>=0.0.10
+# Phase 1: 资料解析与切片
+pypdf>=4.3.0
+tiktoken>=0.7.0

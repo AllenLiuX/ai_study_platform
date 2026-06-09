@@ -38,12 +38,26 @@ export interface ChatSession {
   updated_at?: string | null;
 }
 
+export interface Citation {
+  material_id: string;
+  material_title: string;
+  chunk_index: number;
+  similarity: number;
+  snippet: string;
+}
+
 export interface ChatMessage {
   id?: string;
   session_id: string;
   role: "user" | "assistant" | "system" | "tool";
   content: string;
-  metadata?: Record<string, unknown>;
+  metadata?: {
+    citations?: Citation[];
+    material_ids?: string[];
+    agent_type?: AgentType;
+    model_tier?: string;
+    [key: string]: unknown;
+  };
   created_at?: string | null;
 }
 
@@ -51,4 +65,34 @@ export interface DashboardResponse {
   profile: StudentProfile;
   subjects: Subject[];
   recent_sessions: ChatSession[];
+}
+
+// Phase 1: 学习资料 (上传到 Supabase Storage,后端切片+向量化后供 RAG 检索)
+export type ParseStatus = "pending" | "processing" | "ready" | "failed";
+export type MaterialType =
+  | "textbook"
+  | "handout"
+  | "homework"
+  | "exam"
+  | "note"
+  | "wrong_question"
+  | "other";
+
+export interface Material {
+  id: string;
+  owner_type: "platform" | "student";
+  owner_id: string | null;
+  title: string;
+  subject_id: string | null;
+  grade: string | null;
+  material_type: MaterialType;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  parse_status: ParseStatus;
+  parse_error: string | null;
+  summary: string | null;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
 }

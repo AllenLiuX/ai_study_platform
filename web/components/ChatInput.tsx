@@ -15,6 +15,8 @@ interface ChatInputProps {
   onStop?: () => void;
   /** 是否显示新手提问示例 */
   showStarters: boolean;
+  /** 可选:渲染在输入框上方的额外控件 (例如资料引用 picker) */
+  picker?: React.ReactNode;
 }
 
 export function ChatInput({
@@ -23,6 +25,7 @@ export function ChatInput({
   onSend,
   onStop,
   showStarters,
+  picker,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -53,6 +56,8 @@ export function ChatInput({
   return (
     <div className="border-t border-border/60 bg-background/80 backdrop-blur">
       <div className="mx-auto max-w-3xl px-4 py-4 sm:px-6">
+        {picker && <div className="mb-2">{picker}</div>}
+
         {showStarters && (
           <div className="mb-3 flex flex-wrap gap-2">
             {agent.starterPrompts.map((p) => (

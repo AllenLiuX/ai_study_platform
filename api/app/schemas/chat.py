@@ -39,3 +39,8 @@ class ChatMessage(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str
+    # Phase 1: 引用资料 (RAG)。前端可勾选若干份资料,让 Agent 基于这些资料回答
+    # - None: 不主动检索 (默认)
+    # - []: 显式不引用,与 None 等价
+    # - [id1, id2]: 限定在这些资料中检索 top-k
+    material_ids: list[str] | None = None

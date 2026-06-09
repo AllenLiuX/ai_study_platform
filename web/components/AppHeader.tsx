@@ -1,8 +1,8 @@
 "use client";
 
-import { LogOut, Sparkles } from "lucide-react";
+import { Library, LogOut, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,14 @@ interface AppHeaderProps {
   className?: string;
 }
 
+const NAV_LINKS = [
+  { href: "/dashboard", label: "学习驾驶舱" },
+  { href: "/materials", label: "资料库", icon: Library },
+] as const;
+
 export function AppHeader({ className }: AppHeaderProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,12 +45,38 @@ export function AppHeader({ className }: AppHeaderProps) {
       )}
     >
       <div className="container flex h-16 items-center justify-between">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white">
-            <Sparkles className="h-5 w-5" />
-          </span>
-          <span className="font-semibold tracking-tight">学习驾驶舱</span>
-        </Link>
+        <div className="flex items-center gap-5">
+          <Link href="/dashboard" className="flex items-center gap-2">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <span className="font-semibold tracking-tight">学习驾驶舱</span>
+          </Link>
+          <nav className="hidden items-center gap-1 sm:flex">
+            {NAV_LINKS.map((link) => {
+              const active =
+                link.href === "/dashboard"
+                  ? pathname === "/dashboard"
+                  : pathname?.startsWith(link.href);
+              const Icon = "icon" in link ? link.icon : undefined;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition",
+                    active
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                  )}
+                >
+                  {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+                  {link.label}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
 
         <div className="flex items-center gap-3">
           {email && (

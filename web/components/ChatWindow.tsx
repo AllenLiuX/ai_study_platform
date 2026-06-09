@@ -1,16 +1,18 @@
 "use client";
 
-import { Bot, User } from "lucide-react";
+import { Bot, FileText, User } from "lucide-react";
 import { useEffect, useRef } from "react";
 
+import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { AGENTS } from "@/lib/agents";
-import type { AgentType, ChatMessage } from "@/lib/types";
+import type { AgentType, ChatMessage, Citation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface ChatWindowProps {
   agentType: AgentType;
   messages: ChatMessage[];
   streamingText?: string;
+  streamingCitations?: Citation[];
   isStreaming: boolean;
 }
 
@@ -18,6 +20,7 @@ export function ChatWindow({
   agentType,
   messages,
   streamingText = "",
+  streamingCitations,
   isStreaming,
 }: ChatWindowProps) {
   const agent = AGENTS[agentType];
@@ -61,6 +64,7 @@ export function ChatWindow({
               session_id: "streaming",
               role: "assistant",
               content: streamingText || "正在思考…",
+              metadata: streamingCitations ? { citations: streamingCitations } : undefined,
             }}
             agentType={agentType}
             isStreaming
@@ -82,6 +86,9 @@ function MessageBubble({
 }) {
   const isUser = message.role === "user";
   const agent = AGENTS[agentType];
+  const citations = (message.metadata?.citations as Citation[] | undefined) ?? [];
+  const isPlaceholder =
+    isStreaming && (message.content === "正在思考…" || message.content === "");
 
   return (
     <div
@@ -108,13 +115,59 @@ function MessageBubble({
             : "border border-border/60 bg-card",
         )}
       >
-        <pre className="whitespace-pre-wrap break-words font-sans">
-          {message.content}
-          {isStreaming && (
-            <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse rounded-sm bg-primary align-middle" />
-          )}
-        </pre>
+        {isPlaceholder ? (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            正在思考
+            <span className="inline-flex gap-0.5">
+              <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+              <span className="h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+              <span className="h-1 w-1 animate-bounce rounded-full bg-current" />
+            </span>
+          </span>
+        ) : (
+          <MarkdownMessage
+            content={message.content}
+            variant={isUser ? "user" : "assistant"}
+          />
+        )}
+
+        {isStreaming && !isPlaceholder && (
+          <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse rounded-sm bg-current align-middle opacity-60" />
+        )}
+
+        {!isUser && citations.length > 0 && (
+          <CitationList citations={citations} />
+        )}
       </div>
+    </div>
+  );
+}
+
+function CitationList({ citations }: { citations: Citation[] }) {
+  return (
+    <div className="mt-3 border-t border-border/60 pt-2 text-xs">
+      <div className="mb-1 flex items-center gap-1 text-muted-foreground">
+        <FileText className="h-3 w-3" />
+        <span>引用了 {citations.length} 段资料</span>
+      </div>
+      <ol className="flex flex-col gap-1">
+        {citations.map((c, i) => (
+          <li
+            key={`${c.material_id}-${c.chunk_index}-${i}`}
+            className="flex items-start gap-1.5 text-muted-foreground"
+          >
+            <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-secondary px-1 text-[10px] font-semibold text-secondary-foreground">
+              {i + 1}
+            </span>
+            <span className="flex-1 truncate">
+              《{c.material_title}》第 {c.chunk_index + 1} 段
+              <span className="ml-1 text-foreground/40">
+                · 相似度 {(c.similarity * 100).toFixed(0)}%
+              </span>
+            </span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

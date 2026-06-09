@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -62,6 +64,36 @@ class Settings(BaseSettings):
         )
 
 
+def _ensure_no_proxy(settings: Settings) -> None:
+    """把 Supabase / OpenAI 加入 NO_PROXY,绕过本地企业代理。
+
+    背景:有些开发环境(例如字节内网)默认设了 HTTP(S)_PROXY 指向 127.0.0.1:xxx
+    并对 supabase.co / api.openai.com 返回 403。supabase-py 内部 httpx 不可注入
+    自定义 client,但它默认 trust_env=True,所以能尊重 NO_PROXY。这里在配置初始化时
+    把直连服务追加进去,前端和后端的 httpx.Client(trust_env=True) 都会自动绕过代理。
+    """
+    extras: list[str] = ["api.openai.com", "files.openai.com", "openai.com"]
+    if settings.supabase_url:
+        host = urlparse(settings.supabase_url).hostname
+        if host:
+            extras.append(host)
+            # storage / realtime 也跟 project 同域,顺手加上
+            extras.append(f".{host.split('.', 1)[1]}" if "." in host else host)
+
+    seen: set[str] = set()
+    for key in ("NO_PROXY", "no_proxy"):
+        for p in (os.environ.get(key) or "").split(","):
+            p = p.strip()
+            if p:
+                seen.add(p)
+    seen.update(extras)
+    merged = ",".join(sorted(seen))
+    os.environ["NO_PROXY"] = merged
+    os.environ["no_proxy"] = merged
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    _ensure_no_proxy(settings)
+    return settings

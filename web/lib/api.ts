@@ -4,7 +4,10 @@ import { createSupabaseBrowserClient } from "./supabase/client";
 import type {
   ChatMessage,
   ChatSession,
+  Citation,
   DashboardResponse,
+  Material,
+  MaterialType,
   StudentProfile,
   Subject,
 } from "./types";
@@ -74,22 +77,74 @@ export const chatApi = {
 };
 
 // -----------------------------------------------------------------------------
+// Materials (Phase 1)
+// -----------------------------------------------------------------------------
+export const materialsApi = {
+  list: () => request<Material[]>("/api/materials"),
+  get: (id: string) => request<Material>(`/api/materials/${id}`),
+  delete: (id: string) =>
+    request<void>(`/api/materials/${id}`, { method: "DELETE" }),
+  upload: async (file: File, fields: {
+    title?: string;
+    subject_id?: string | null;
+    grade?: string | null;
+    material_type?: MaterialType;
+  } = {}): Promise<Material> => {
+    const token = await getAccessToken();
+    const form = new FormData();
+    form.set("file", file);
+    if (fields.title) form.set("title", fields.title);
+    if (fields.subject_id) form.set("subject_id", fields.subject_id);
+    if (fields.grade) form.set("grade", fields.grade);
+    if (fields.material_type) form.set("material_type", fields.material_type);
+
+    const resp = await fetch(`${API_BASE}/api/materials`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!resp.ok) {
+      let detail = `上传失败 ${resp.status}`;
+      try {
+        const body = await resp.json();
+        detail = body.detail ?? body.message ?? detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail);
+    }
+    return (await resp.json()) as Material;
+  },
+};
+
+// -----------------------------------------------------------------------------
 // SSE 发送消息
 // -----------------------------------------------------------------------------
 export interface SendMessageHandlers {
   onReady?: (info: { agent_type: string }) => void;
+  onCitations?: (citations: Citation[]) => void;
+  onWarning?: (message: string) => void;
   onDelta: (text: string) => void;
-  onDone?: (info: { length: number }) => void;
+  onDone?: (info: { length: number; citation_count?: number }) => void;
   onError?: (message: string) => void;
+}
+
+export interface SendMessageOptions {
+  materialIds?: string[];
 }
 
 export async function sendMessageStream(
   sessionId: string,
   content: string,
   handlers: SendMessageHandlers,
+  options: SendMessageOptions = {},
   signal?: AbortSignal,
 ): Promise<void> {
   const token = await getAccessToken();
+  const body: Record<string, unknown> = { content };
+  if (options.materialIds && options.materialIds.length > 0) {
+    body.material_ids = options.materialIds;
+  }
   const resp = await fetch(
     `${API_BASE}/api/chat/sessions/${sessionId}/messages`,
     {
@@ -98,7 +153,7 @@ export async function sendMessageStream(
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
       signal,
     },
   );
@@ -134,6 +189,8 @@ export async function sendMessageStream(
       try {
         const payload = data ? JSON.parse(data) : {};
         if (event === "ready") handlers.onReady?.(payload);
+        else if (event === "citations") handlers.onCitations?.(payload.items ?? []);
+        else if (event === "warning") handlers.onWarning?.(payload.message ?? "");
         else if (event === "delta") handlers.onDelta(payload.text ?? "");
         else if (event === "done") handlers.onDone?.(payload);
         else if (event === "error") handlers.onError?.(payload.message ?? "服务异常");

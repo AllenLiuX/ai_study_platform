@@ -27,12 +27,26 @@
 - [x] Chat SSE 流式接口 + 历史消息持久化
 - [x] 端到端联调脚本 [scripts/dev.sh](scripts/dev.sh)
 
+### Phase 1 — 资料上传 + RAG ✅
+
+让学生把自己的笔记 / 讲义 / 错题本上传进来,AI 老师基于这些资料回答,而不是泛泛而谈。
+
+- [x] Supabase Storage `materials` 桶 + RLS 隔离 (学生只能读自己目录)
+- [x] `learning_materials` + `material_chunks` 表 + HNSW 向量索引 ([0002_phase1_materials.sql](supabase/migrations/0002_phase1_materials.sql))
+- [x] 上传 → 后台异步解析 (PDF via `pypdf` / TXT / Markdown) → token-aware 切片 (tiktoken, 目标 400 + 重叠 50) → `text-embedding-3-small` 向量化
+- [x] pgvector `match_material_chunks` RPC,owner / material_ids 双重过滤后 top-k cosine 检索
+- [x] Chat 消息可带 `material_ids`,Agent runtime 把召回片段注入 system prompt 并要求用 `[1] [2]` 引用
+- [x] SSE 新增 `citations` 事件,前端实时展示;assistant 消息 `metadata.citations` 持久化
+- [x] 前端 `/materials` 页:拖拽上传 + 状态徽章 (排队/切片中/可用/失败) + 删除 + 自动轮询
+- [x] Chat 输入框上方 `MaterialPicker`,勾选若干份资料就能让老师基于它们回答
+- [x] **Markdown 对话渲染**:`react-markdown` + GFM (表格 / 删除线 / 任务列表) + KaTeX 数学公式 (`$x^2+1=0$`, `$$\frac{a}{b}$$`),数学老师终于能写公式了
+
 ### 后续 Phase Roadmap
 
-- **Phase 1 — 资料上传 + RAG**:Supabase Storage 文件上传、PDF/Word/TXT 解析、切片、`text-embedding-3-small` 向量化、pgvector top-k 检索,Chat 回答中展示引用资料来源
 - **Phase 2 — 学习进度沉淀**:`knowledge_points` 种子树 + 对话后用 LLM 抽取知识点和薄弱点 → 写入 `student_progress`;Dashboard 渲染真实掌握度
 - **Phase 3 — 任务系统 + 学习报告**:规则 + LLM 生成今日任务、周学习报告
-- **Phase 4 — 管理端 + 安全**:平台公共资料、学生列表/对话日志、内容安全审核
+- **Phase 4 — 多模态**:图片(题目拍照)/ 手写公式 / 语音输入
+- **Phase 5 — 管理端 + 家长端**:平台公共资料、学生列表/对话日志、家长视角周报、内容安全审核
 
 ---
 
@@ -58,7 +72,9 @@ flowchart TB
   FastAPI -->|"Verify JWT"| SupabaseAuth
   FastAPI -->|"service role"| SupabaseDB["Supabase Postgres<br/>+ pgvector"]
   FastAPI -->|"Chat / Embedding"| OpenAI["OpenAI API<br/>gpt-4o-mini / 4o"]
-  SupabaseDB -.->|"Phase 1+"| RAG["Material Chunks<br/>pgvector"]
+  SupabaseDB -->|"top-k cosine"| RAG["Material Chunks<br/>pgvector HNSW"]
+  Browser -->|"upload PDF/MD"| Storage["Supabase Storage<br/>materials/"]
+  FastAPI -.->|"BackgroundTasks<br/>parse → chunk → embed"| Storage
 ```
 
 ---
@@ -71,28 +87,35 @@ student_coach/
   .env.example             # 模板
   product_design.md        # 产品设计文档
   README.md                # (本文件)
-  scripts/dev.sh           # 一键启动前后端
+  scripts/
+    dev.sh                 # 一键启动前后端
+    smoke_test.py          # 后端 Phase 0 端到端测试 (34 项)
+    phase1_smoke.py        # 后端 Phase 1 RAG 端到端测试 (17 项)
+    frontend_smoke.py      # 前端中间件 + 路由保护测试 (16 项)
   supabase/
-    migrations/0001_phase0_init.sql
+    migrations/
+      0001_phase0_init.sql
+      0002_phase1_materials.sql
     seed.sql               # 种子学科数据
   web/                     # Next.js 前端
     app/
       (auth)/login         (auth)/signup
       onboarding
       dashboard
+      materials            # 资料库 (Phase 1)
       chat/[sessionId]
-    components/            # StudentHeader / TaskCard / AgentSidebar / ChatWindow ...
+    components/            # MarkdownMessage / MaterialUploader / MaterialPicker / ChatWindow ...
     lib/                   # supabase 客户端、api 封装、agents 配置、types
     middleware.ts          # 路由级登录保护
   api/                     # FastAPI 后端
     app/
       main.py
       core/                # config / auth / llm
-      routes/              # chat / students / health
-      services/            # chat_service (与 agent runtime 粘合)
+      routes/              # chat / students / materials / health
+      services/            # chat_service / parser / chunker / embedding / retrieval / material_processor
       agents/              # registry + 四个 prompt 文件 + runtime
       db/                  # supabase_client + repos
-      schemas/             # Pydantic 模型
+      schemas/             # Pydantic 模型 (含 material)
     requirements.txt
 ```
 
@@ -107,9 +130,11 @@ student_coach/
    - `Project URL` → `SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_URL`
    - `anon public` key → `SUPABASE_ANON_KEY` 和 `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (**只给后端用,别泄到前端**)
-3. 打开 Supabase Dashboard → `SQL Editor`,新建查询粘贴 [supabase/migrations/0001_phase0_init.sql](supabase/migrations/0001_phase0_init.sql) 内容并执行
-4. 再粘贴 [supabase/seed.sql](supabase/seed.sql) 执行一次,导入数学/英语/语文三个学科
-5. (可选) `Authentication → Providers → Email` 中,本地开发可以关闭 "Confirm email" 让注册更顺;生产环境务必打开
+3. 打开 Supabase Dashboard → `SQL Editor`,依次粘贴并执行:
+   - [supabase/migrations/0001_phase0_init.sql](supabase/migrations/0001_phase0_init.sql) — 基础表 + RLS
+   - [supabase/migrations/0002_phase1_materials.sql](supabase/migrations/0002_phase1_materials.sql) — 资料库 + pgvector + Storage 桶
+   - [supabase/seed.sql](supabase/seed.sql) — 数学/英语/语文三个学科种子
+4. (可选) `Authentication → Providers → Email` 中,本地开发可以关闭 "Confirm email" 让注册更顺;生产环境务必打开
 
 ### 1. 启动
 
@@ -143,9 +168,11 @@ npm run dev
 
 ---
 
-## Phase 0 验收清单
+## 验收清单
 
-打开 [http://localhost:3000](http://localhost:3000),按顺序完成以下流程,即表示 Phase 0 成功:
+打开 [http://localhost:3000](http://localhost:3000),按顺序完成以下流程:
+
+### Phase 0 — 对话基础
 
 1. 进入登录页,点击「注册一个新账号」
 2. 填写昵称、邮箱、密码完成注册(若 Supabase 开了邮箱确认,先到邮箱点链接)
@@ -153,9 +180,32 @@ npm run dev
 4. 完成后进入 Dashboard,看到自己的昵称、年级、目标、班主任入口、各科卡片、最近对话(空)
 5. 点 Dashboard 上「找班主任规划一下」或任意一张科目卡片
 6. 进入 Chat 页,看到 AI 老师的欢迎语和三条引导式提问
-7. 输入任意问题(例如:"我数学一次函数总弄不懂,你能讲讲吗?"),应该看到 AI 流式逐字回复,符合该角色风格
+7. 输入任意问题(例如:"我数学一次函数总弄不懂,你能讲讲吗?"),应该看到 **AI 流式逐字回复 + markdown 渲染** (列表、加粗、代码块、$x^2$ 公式都能显示)
 8. 刷新页面,对话历史仍在;左侧「历史对话」列表里能看到这次会话
-9. 点击 Dashboard 上方科目卡片,会切换/创建对应学科的对话
+
+### Phase 1 — 资料 + RAG
+
+9. 顶部导航点「资料库」,把一份 PDF/Markdown 笔记拖到上传区,填写标题、学科,点「上传并向量化」
+10. 卡片状态会从「排队中 → 切片中 → 可用」(几秒钟,看资料大小)
+11. 回到 Chat 页,输入框上方点「引用资料」,勾选刚上传的笔记
+12. 提问相关问题(例如笔记里提到的概念),AI 流式回复后:
+    - 消息下方应该列出引用的 1-5 个资料片段
+    - 回答正文里会出现 `[1]` `[2]` 角标对应引用顺序
+    - 如果勾选的资料里没相关内容,会在顶部弹一条黄色提示「未在资料里找到相关内容」
+13. 删除资料 → 关联的 chunks 和 Storage 文件级联清掉
+
+### 自动化测试 (可选)
+
+```bash
+# 后端 Phase 0 (34 项) - 注册/auth/dashboard/4 个 Agent/SSE 流
+python scripts/smoke_test.py
+
+# 后端 Phase 1 (17 项) - 上传/异步切片/RAG 召回/citations 持久化/级联删除
+python scripts/phase1_smoke.py
+
+# 前端 (16 项) - 中间件 / 路由保护 / SSR
+python scripts/frontend_smoke.py
+```
 
 ---
 
@@ -201,4 +251,13 @@ A: 同上,大概率是后端不可达或 Supabase 配置缺失,导致 `GET /api/
 A: Supabase Auth token 失效或 `SUPABASE_URL` 配置错。重新登录通常即可。
 
 **Q: 想直接拿来部署?**
-A: Phase 0 是开发版本。生产部署建议:前端走 Vercel,后端 Dockerize 上 Railway/Render/Fly;务必在 Supabase 打开邮箱确认 + RLS;`SUPABASE_SERVICE_ROLE_KEY` 只在后端环境变量配置。
+A: Phase 0 / Phase 1 是开发版本。生产部署建议:前端走 Vercel,后端 Dockerize 上 Railway/Render/Fly;务必在 Supabase 打开邮箱确认 + RLS;`SUPABASE_SERVICE_ROLE_KEY` 只在后端环境变量配置。
+
+**Q: 上传后 parse_status 一直 pending?**
+A: FastAPI BackgroundTasks 是 in-process 异步,如果后端在 reload 时正好 task 还没启动会丢。重新上传一次通常即可。Phase 2+ 会考虑用 RQ/Celery 把后台任务独立出来。
+
+**Q: 后端连 Supabase Auth 报 `ProxyError: 403`?**
+A: 本地有企业代理拦截了 Supabase。我们在 `app/core/config.py` 自动把 Supabase / OpenAI 域名加进 `NO_PROXY`,supabase-py 内部 httpx 会绕过。如还有问题,先 `unset HTTPS_PROXY HTTP_PROXY` 再启动后端。
+
+**Q: PDF 上传后报 "PDF 中没有提取到可读文本"?**
+A: 当前 Phase 1 用 `pypdf` 只能抽取已嵌入文本的 PDF。扫描件 / 图片型 PDF 需要 OCR,放在 Phase 4 多模态里做。临时方案:用 Adobe / Preview 导出为 Markdown 或 TXT 再上传。

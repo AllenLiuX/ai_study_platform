@@ -72,7 +72,12 @@ def main() -> int:
         f"status={status} loc={loc}",
     )
 
-    for path in ["/dashboard", "/onboarding", "/chat/00000000-0000-0000-0000-000000000000"]:
+    for path in [
+        "/dashboard",
+        "/onboarding",
+        "/materials",
+        "/chat/00000000-0000-0000-0000-000000000000",
+    ]:
         status, _, headers = fetch(path)
         loc = headers.get("location") or headers.get("Location") or ""
         check(

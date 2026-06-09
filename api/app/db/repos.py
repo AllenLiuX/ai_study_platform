@@ -143,3 +143,104 @@ def insert_message(
     }
     resp = client.table("chat_messages").insert(payload).execute()
     return (resp.data or [payload])[0]
+
+
+# -----------------------------------------------------------------------------
+# Learning Materials & Chunks (Phase 1)
+# -----------------------------------------------------------------------------
+def insert_material(payload: dict[str, Any]) -> dict:
+    """新建一条 learning_materials,通常 parse_status='pending'。"""
+    client = get_admin_client()
+    resp = client.table("learning_materials").insert(payload).execute()
+    return (resp.data or [payload])[0]
+
+
+def update_material(material_id: str, fields: dict[str, Any]) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("learning_materials")
+        .update(fields)
+        .eq("id", material_id)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def get_material(material_id: str, owner_id: str) -> dict | None:
+    """学生权限下读单条 (确保归属本人或平台公共)。"""
+    client = get_admin_client()
+    resp = (
+        client.table("learning_materials")
+        .select("*")
+        .eq("id", material_id)
+        .or_(f"owner_id.eq.{owner_id},owner_type.eq.platform")
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def get_material_by_id(material_id: str) -> dict | None:
+    """后端内部用,不做归属过滤。"""
+    client = get_admin_client()
+    resp = (
+        client.table("learning_materials")
+        .select("*")
+        .eq("id", material_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def list_materials(owner_id: str, limit: int = 100) -> list[dict]:
+    """学生维度的资料列表 (含平台公共资料)。"""
+    client = get_admin_client()
+    resp = (
+        client.table("learning_materials")
+        .select("*")
+        .or_(f"owner_id.eq.{owner_id},owner_type.eq.platform")
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return resp.data or []
+
+
+def delete_material(material_id: str, owner_id: str) -> bool:
+    """仅允许删自己上传的;chunks 会随 ON DELETE CASCADE 一起删。"""
+    client = get_admin_client()
+    resp = (
+        client.table("learning_materials")
+        .delete()
+        .eq("id", material_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    return bool(resp.data)
+
+
+def insert_material_chunks(rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    client = get_admin_client()
+    # supabase-py 的 insert 上限大约几百行,实践中一份资料 chunk 数远低于这个,直接一次性插
+    client.table("material_chunks").insert(rows).execute()
+
+
+def delete_material_chunks(material_id: str) -> None:
+    """重处理时清掉旧 chunk。"""
+    client = get_admin_client()
+    client.table("material_chunks").delete().eq("material_id", material_id).execute()
+
+
+def count_material_chunks(material_id: str) -> int:
+    client = get_admin_client()
+    resp = (
+        client.table("material_chunks")
+        .select("id", count="exact")
+        .eq("material_id", material_id)
+        .execute()
+    )
+    return resp.count or 0

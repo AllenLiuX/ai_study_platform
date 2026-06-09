@@ -8,11 +8,12 @@ import { AgentSidebar } from "@/components/AgentSidebar";
 import { AppHeader } from "@/components/AppHeader";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatWindow } from "@/components/ChatWindow";
+import { MaterialPicker } from "@/components/MaterialPicker";
 import { StudentProfilePanel } from "@/components/StudentProfilePanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AGENTS } from "@/lib/agents";
-import { chatApi, sendMessageStream, studentApi } from "@/lib/api";
-import type { AgentType, ChatMessage } from "@/lib/types";
+import { chatApi, materialsApi, sendMessageStream, studentApi } from "@/lib/api";
+import type { AgentType, ChatMessage, Citation } from "@/lib/types";
 
 export default function ChatSessionPage() {
   const params = useParams<{ sessionId: string }>();
@@ -36,6 +37,11 @@ export default function ChatSessionPage() {
     enabled: !!sessionId,
   });
 
+  const materialsQuery = useQuery({
+    queryKey: ["materials"],
+    queryFn: materialsApi.list,
+  });
+
   const session = useMemo(
     () => sessionsQuery.data?.find((s) => s.id === sessionId),
     [sessionsQuery.data, sessionId],
@@ -45,8 +51,11 @@ export default function ChatSessionPage() {
   const agent = AGENTS[agentType];
 
   const [streamingText, setStreamingText] = useState("");
+  const [streamingCitations, setStreamingCitations] = useState<Citation[]>([]);
+  const [streamingWarning, setStreamingWarning] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
   const messages = useMemo(() => {
@@ -55,17 +64,23 @@ export default function ChatSessionPage() {
   }, [messagesQuery.data, optimisticMessages]);
 
   const send = useCallback(
-    async (content: string) => {
+    async (content: string, options: { materialIds?: string[] } = {}) => {
       if (!sessionId || isStreaming) return;
+      const effectiveMaterialIds = options.materialIds ?? selectedMaterialIds;
 
       const localUserMsg: ChatMessage = {
         session_id: sessionId,
         role: "user",
         content,
         created_at: new Date().toISOString(),
+        metadata: effectiveMaterialIds.length
+          ? { material_ids: effectiveMaterialIds }
+          : undefined,
       };
       setOptimisticMessages((prev) => [...prev, localUserMsg]);
       setStreamingText("");
+      setStreamingCitations([]);
+      setStreamingWarning(null);
       setIsStreaming(true);
 
       const ctrl = new AbortController();
@@ -77,8 +92,9 @@ export default function ChatSessionPage() {
           content,
           {
             onDelta: (text) => setStreamingText((prev) => prev + text),
+            onCitations: (items) => setStreamingCitations(items),
+            onWarning: (msg) => setStreamingWarning(msg),
             onDone: async () => {
-              // 流结束后,重新拉最新消息以替换 optimistic
               await queryClient.invalidateQueries({
                 queryKey: ["chat-messages", sessionId],
               });
@@ -87,6 +103,8 @@ export default function ChatSessionPage() {
               });
               setOptimisticMessages([]);
               setStreamingText("");
+              setStreamingCitations([]);
+              setStreamingWarning(null);
               setIsStreaming(false);
               abortRef.current = null;
             },
@@ -100,10 +118,13 @@ export default function ChatSessionPage() {
                 },
               ]);
               setStreamingText("");
+              setStreamingCitations([]);
+              setStreamingWarning(null);
               setIsStreaming(false);
               abortRef.current = null;
             },
           },
+          { materialIds: effectiveMaterialIds },
           ctrl.signal,
         );
       } catch (err) {
@@ -118,11 +139,13 @@ export default function ChatSessionPage() {
           ]);
         }
         setStreamingText("");
+        setStreamingCitations([]);
+        setStreamingWarning(null);
         setIsStreaming(false);
         abortRef.current = null;
       }
     },
-    [sessionId, isStreaming, queryClient],
+    [sessionId, isStreaming, queryClient, selectedMaterialIds],
   );
 
   function stop() {
@@ -156,19 +179,35 @@ export default function ChatSessionPage() {
               <Skeleton className="h-20" />
             </div>
           ) : (
-            <ChatWindow
-              agentType={agentType}
-              messages={messages}
-              streamingText={streamingText}
-              isStreaming={isStreaming}
-            />
+            <>
+              {streamingWarning && (
+                <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+                  {streamingWarning}
+                </div>
+              )}
+              <ChatWindow
+                agentType={agentType}
+                messages={messages}
+                streamingText={streamingText}
+                streamingCitations={streamingCitations}
+                isStreaming={isStreaming}
+              />
+            </>
           )}
           <ChatInput
             agent={agent}
             disabled={isStreaming || !sessionId}
-            onSend={send}
+            onSend={(text) => send(text)}
             onStop={stop}
             showStarters={messages.length <= 1 && !isStreaming}
+            picker={
+              <MaterialPicker
+                materials={materialsQuery.data ?? []}
+                isLoading={materialsQuery.isLoading}
+                selectedIds={selectedMaterialIds}
+                onChange={setSelectedMaterialIds}
+              />
+            }
           />
         </div>
 
