@@ -46,6 +46,15 @@ export interface Citation {
   snippet: string;
 }
 
+export type FollowUpType = "deep_dive" | "explore" | "practice" | "review";
+
+export interface FollowUp {
+  type: FollowUpType;
+  question: string;
+  knowledge_point?: string | null;
+  reason?: string | null;
+}
+
 export interface ChatMessage {
   id?: string;
   session_id: string;
@@ -57,6 +66,7 @@ export interface ChatMessage {
     agent_type?: AgentType;
     model?: string;
     model_tier?: string;
+    follow_ups?: FollowUp[];
     [key: string]: unknown;
   };
   created_at?: string | null;

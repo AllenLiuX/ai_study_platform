@@ -62,6 +62,18 @@
 - [x] `MaterialPicker` 分 section 显示两类资料;选中后后端 RAG 不需要区分
 - [x] `scripts/phase15_smoke.py`:12 项断言,验证新用户能看到 platform 资料 + 基于 platform 做 RAG + 不能删 platform
 
+### Phase 2.5 — 学习流引导 (Follow-up Suggestions) ✅
+
+让学生不用每次自己想下一步问什么 — 每轮回答之后,AI 立刻给 2-3 条「接下来可以问什么」的胶囊建议,一键续问。
+
+- [x] **抽取服务** ([suggester.py](api/app/services/suggester.py)):`gpt-4o-mini` + JSON mode,基于最近一轮对话 + 学生薄弱点 + 候选 KP 列表生成 2-3 条建议
+- [x] **四种类型**:`deep_dive` (继续深入)、`explore` (拓展课题)、`practice` (做道题)、`review` (回顾薄弱);至少 1 条 deep_dive 兜底
+- [x] **SSE 集成**:`follow_ups` 事件在主回答 streaming 结束后、`done` 之前推送,前端在用户看完回答时建议正好就绪
+- [x] **持久化**:写入 `assistant.metadata.follow_ups`,刷新会话依然能看到建议
+- [x] **前端**:`ChatWindow` 在最后一条 assistant 消息下方渲染 4 种类型的胶囊按钮(配对应图标),点击即续问;streaming 中显示"AI 正在准备建议…"的微提示
+- [x] **学科 + 班主任都支持**:学科老师注入候选 KP 提高准确度;班主任也能给学习节奏类建议
+- [x] `scripts/phase25_smoke.py`:9 项断言,验证 SSE follow_ups 在 done 前到达 + metadata 落库 + 至少 1 条 deep_dive
+
 ### Phase 2 — 学习进度沉淀 ✅
 
 每次和学科老师聊天后,后台异步抽取这一轮涉及的知识点 + 掌握度,沉淀到 `student_progress`,Dashboard 各科卡片实时反映真实状态。
@@ -144,6 +156,7 @@ student_coach/
     phase1_smoke.py                 # Phase 1 (RAG) 后端冒烟
     phase15_smoke.py                # Phase 1.5 (公共资料) 后端冒烟
     phase2_smoke.py                 # Phase 2 (学习进度) 后端冒烟
+    phase25_smoke.py                # Phase 2.5 (follow-up 引导) 后端冒烟
     frontend_smoke.py               # 前端路由 + 中间件冒烟
     apply_migration.py              # psycopg 直连应用任意 .sql migration
     generate_knowledge_notes.py     # Phase 1.5: 基于课标生成 AI 讲义

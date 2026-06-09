@@ -6,6 +6,7 @@ import type {
   ChatSession,
   Citation,
   DashboardResponse,
+  FollowUp,
   Material,
   MaterialType,
   StudentProfile,
@@ -149,6 +150,7 @@ export interface SendMessageHandlers {
   onCitations?: (citations: Citation[]) => void;
   onWarning?: (message: string) => void;
   onDelta: (text: string) => void;
+  onFollowUps?: (items: FollowUp[]) => void;
   onDone?: (info: {
     length: number;
     citation_count?: number;
@@ -220,6 +222,7 @@ export async function sendMessageStream(
         else if (event === "citations") handlers.onCitations?.(payload.items ?? []);
         else if (event === "warning") handlers.onWarning?.(payload.message ?? "");
         else if (event === "delta") handlers.onDelta(payload.text ?? "");
+        else if (event === "follow_ups") handlers.onFollowUps?.(payload.items ?? []);
         else if (event === "done") handlers.onDone?.(payload);
         else if (event === "error") handlers.onError?.(payload.message ?? "服务异常");
       } catch (err) {

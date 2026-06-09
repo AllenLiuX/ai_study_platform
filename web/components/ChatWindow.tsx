@@ -1,11 +1,26 @@
 "use client";
 
-import { FileText, Sparkles, User } from "lucide-react";
+import {
+  ArrowRight,
+  Compass,
+  FileText,
+  Loader2,
+  PencilLine,
+  RotateCcw,
+  Sparkles,
+  User,
+} from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { AGENTS } from "@/lib/agents";
-import type { AgentType, ChatMessage, Citation } from "@/lib/types";
+import type {
+  AgentType,
+  ChatMessage,
+  Citation,
+  FollowUp,
+  FollowUpType,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface ChatWindowProps {
@@ -13,9 +28,11 @@ interface ChatWindowProps {
   messages: ChatMessage[];
   streamingText?: string;
   streamingCitations?: Citation[];
+  streamingFollowUps?: FollowUp[];
   isStreaming: boolean;
   /** 当前驱动的 LLM 型号,例如 gpt-4o-mini。仅做展示用 */
   modelLabel?: string;
+  onFollowUpClick?: (question: string) => void;
 }
 
 export function ChatWindow({
@@ -23,8 +40,10 @@ export function ChatWindow({
   messages,
   streamingText = "",
   streamingCitations,
+  streamingFollowUps,
   isStreaming,
   modelLabel,
+  onFollowUpClick,
 }: ChatWindowProps) {
   const agent = AGENTS[agentType];
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -33,7 +52,15 @@ export function ChatWindow({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, streamingFollowUps]);
+
+  // 最后一条 assistant 消息的索引 (用于决定在哪里渲染 follow_ups)
+  const lastAssistantIdx = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") return i;
+    }
+    return -1;
+  })();
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
@@ -58,30 +85,114 @@ export function ChatWindow({
           </div>
         )}
 
-        {messages.map((msg, idx) => (
-          <MessageBubble
-            key={msg.id ?? idx}
-            message={msg}
-            agentType={agentType}
-            modelLabel={modelLabel}
-          />
-        ))}
+        {messages.map((msg, idx) => {
+          const isLastAssistant = idx === lastAssistantIdx;
+          const persistedFollowUps = msg.metadata?.follow_ups as
+            | FollowUp[]
+            | undefined;
+          const showFollowUps =
+            isLastAssistant &&
+            !isStreaming &&
+            persistedFollowUps &&
+            persistedFollowUps.length > 0;
+          return (
+            <div key={msg.id ?? idx} className="space-y-2">
+              <MessageBubble
+                message={msg}
+                agentType={agentType}
+                modelLabel={modelLabel}
+              />
+              {showFollowUps && (
+                <FollowUpRow
+                  items={persistedFollowUps!}
+                  onClick={onFollowUpClick}
+                />
+              )}
+            </div>
+          );
+        })}
 
         {isStreaming && (
-          <MessageBubble
-            message={{
-              session_id: "streaming",
-              role: "assistant",
-              content: streamingText || "正在思考…",
-              metadata: streamingCitations
-                ? { citations: streamingCitations }
-                : undefined,
-            }}
-            agentType={agentType}
-            modelLabel={modelLabel}
-            isStreaming
-          />
+          <div className="space-y-2">
+            <MessageBubble
+              message={{
+                session_id: "streaming",
+                role: "assistant",
+                content: streamingText || "正在思考…",
+                metadata: streamingCitations
+                  ? { citations: streamingCitations }
+                  : undefined,
+              }}
+              agentType={agentType}
+              modelLabel={modelLabel}
+              isStreaming
+            />
+            {streamingText && !streamingFollowUps && (
+              <div className="ml-12 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-[11px] text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                AI 正在准备「接下来可以问什么」…
+              </div>
+            )}
+            {streamingFollowUps && streamingFollowUps.length > 0 && (
+              <FollowUpRow
+                items={streamingFollowUps}
+                onClick={onFollowUpClick}
+              />
+            )}
+          </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+const FOLLOW_UP_CONFIG: Record<
+  FollowUpType,
+  { label: string; icon: typeof ArrowRight }
+> = {
+  deep_dive: { label: "继续深入", icon: ArrowRight },
+  explore: { label: "拓展课题", icon: Compass },
+  practice: { label: "做道题", icon: PencilLine },
+  review: { label: "巩固薄弱", icon: RotateCcw },
+};
+
+function FollowUpRow({
+  items,
+  onClick,
+}: {
+  items: FollowUp[];
+  onClick?: (question: string) => void;
+}) {
+  return (
+    <div className="ml-12 flex flex-col gap-2 animate-fade-in">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Sparkles className="h-3 w-3 text-primary" />
+        <span>接下来你也可以问：</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((f, i) => {
+          const cfg = FOLLOW_UP_CONFIG[f.type] ?? FOLLOW_UP_CONFIG.deep_dive;
+          const Icon = cfg.icon;
+          return (
+            <button
+              key={`${f.type}-${i}`}
+              type="button"
+              onClick={() => onClick?.(f.question)}
+              className={cn(
+                "group inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition",
+                "border-primary/20 bg-primary/5 text-foreground hover:border-primary/40 hover:bg-primary/10",
+              )}
+              title={f.reason || cfg.label}
+            >
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                <Icon className="h-3 w-3" />
+                {cfg.label}
+              </span>
+              <span className="text-muted-foreground/40">·</span>
+              <span className="font-medium">{f.question}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

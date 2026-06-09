@@ -20,7 +20,12 @@ import {
   sendMessageStream,
   studentApi,
 } from "@/lib/api";
-import type { AgentType, ChatMessage, Citation } from "@/lib/types";
+import type {
+  AgentType,
+  ChatMessage,
+  Citation,
+  FollowUp,
+} from "@/lib/types";
 
 export default function ChatSessionPage() {
   const params = useParams<{ sessionId: string }>();
@@ -66,6 +71,7 @@ export default function ChatSessionPage() {
 
   const [streamingText, setStreamingText] = useState("");
   const [streamingCitations, setStreamingCitations] = useState<Citation[]>([]);
+  const [streamingFollowUps, setStreamingFollowUps] = useState<FollowUp[]>([]);
   const [streamingWarning, setStreamingWarning] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
@@ -94,6 +100,7 @@ export default function ChatSessionPage() {
       setOptimisticMessages((prev) => [...prev, localUserMsg]);
       setStreamingText("");
       setStreamingCitations([]);
+      setStreamingFollowUps([]);
       setStreamingWarning(null);
       setIsStreaming(true);
 
@@ -107,6 +114,7 @@ export default function ChatSessionPage() {
           {
             onDelta: (text) => setStreamingText((prev) => prev + text),
             onCitations: (items) => setStreamingCitations(items),
+            onFollowUps: (items) => setStreamingFollowUps(items),
             onWarning: (msg) => setStreamingWarning(msg),
             onDone: async () => {
               await queryClient.invalidateQueries({
@@ -118,6 +126,7 @@ export default function ChatSessionPage() {
               setOptimisticMessages([]);
               setStreamingText("");
               setStreamingCitations([]);
+              setStreamingFollowUps([]);
               setStreamingWarning(null);
               setIsStreaming(false);
               abortRef.current = null;
@@ -133,6 +142,7 @@ export default function ChatSessionPage() {
               ]);
               setStreamingText("");
               setStreamingCitations([]);
+              setStreamingFollowUps([]);
               setStreamingWarning(null);
               setIsStreaming(false);
               abortRef.current = null;
@@ -154,6 +164,7 @@ export default function ChatSessionPage() {
         }
         setStreamingText("");
         setStreamingCitations([]);
+        setStreamingFollowUps([]);
         setStreamingWarning(null);
         setIsStreaming(false);
         abortRef.current = null;
@@ -216,8 +227,10 @@ export default function ChatSessionPage() {
                 messages={messages}
                 streamingText={streamingText}
                 streamingCitations={streamingCitations}
+                streamingFollowUps={streamingFollowUps}
                 isStreaming={isStreaming}
                 modelLabel={chatModel}
+                onFollowUpClick={(q) => send(q)}
               />
             </>
           )}

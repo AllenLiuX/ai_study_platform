@@ -12,9 +12,11 @@ from ..agents.registry import AgentConfig, get_agent
 from ..agents.runtime import stream_reply
 from ..core.llm import resolve_model
 from ..db import repos
+from ..db.supabase_client import get_admin_client
 from ..schemas.chat import CreateSessionRequest
 from .progress_extractor import extract_and_update
 from .retrieval import RetrievedChunk, format_context, retrieve_chunks
+from .suggester import suggest_follow_ups
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +201,42 @@ async def stream_assistant_reply(
                 user_msg=user_content,
                 assistant_msg=full_text,
             )
+
+        # Phase 2.5: 主回答 streaming 完成后 inline 生成「下一步建议」,
+        # 通过 SSE follow_ups 事件推送,并持久化到 assistant.metadata.follow_ups
+        if full_text:
+            try:
+                follow_ups = await suggest_follow_ups(
+                    student_id=user_id,
+                    agent=agent,
+                    subject_id=subject_id,
+                    user_msg=user_content,
+                    assistant_msg=full_text,
+                )
+            except Exception as exc:
+                logger.warning("suggest_follow_ups 失败: %s", exc)
+                follow_ups = []
+
+            if follow_ups:
+                items = [fu.model_dump() for fu in follow_ups]
+                yield _sse("follow_ups", {"items": items})
+                if assistant_message_id:
+                    try:
+                        client = get_admin_client()
+                        current = (
+                            client.table("chat_messages")
+                            .select("metadata")
+                            .eq("id", assistant_message_id)
+                            .maybe_single()
+                            .execute()
+                        )
+                        md = (current.data or {}).get("metadata") or {}
+                        md["follow_ups"] = items
+                        client.table("chat_messages").update({"metadata": md}).eq(
+                            "id", assistant_message_id
+                        ).execute()
+                    except Exception as exc:
+                        logger.warning("写回 follow_ups 失败: %s", exc)
 
         if not session.get("title") or session.get("title", "").endswith("的对话"):
             short_title = user_content.strip().splitlines()[0][:20]
