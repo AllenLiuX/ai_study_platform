@@ -1,6 +1,13 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, FileText, Loader2, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +18,8 @@ interface MaterialCardProps {
   material: Material;
   onDelete: () => void;
   deleting?: boolean;
+  /** 当前 embedding 模型,用来在状态徽章 / 摘要中显式标出 AI */
+  embeddingModel?: string;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -23,14 +32,19 @@ const TYPE_LABEL: Record<string, string> = {
   other: "其他",
 };
 
-export function MaterialCard({ material, onDelete, deleting }: MaterialCardProps) {
+export function MaterialCard({
+  material,
+  onDelete,
+  deleting,
+  embeddingModel,
+}: MaterialCardProps) {
   const sizeKB = (material.size_bytes / 1024).toFixed(1);
   const ext = material.original_filename.split(".").pop()?.toUpperCase() ?? "";
 
   return (
-    <div className="group relative flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-4 shadow-sm transition hover:shadow-card">
+    <div className="group relative flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-card transition hover:-translate-y-0.5">
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 text-indigo-600">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-secondary text-muted-foreground">
           <FileText className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
@@ -44,7 +58,7 @@ export function MaterialCard({ material, onDelete, deleting }: MaterialCardProps
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 opacity-0 transition group-hover:opacity-100"
+          className="h-7 w-7 text-muted-foreground opacity-0 transition group-hover:opacity-100"
           onClick={onDelete}
           disabled={deleting}
           title="删除"
@@ -52,7 +66,7 @@ export function MaterialCard({ material, onDelete, deleting }: MaterialCardProps
           {deleting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <Trash2 className="h-4 w-4 text-destructive/80" />
+            <Trash2 className="h-4 w-4" />
           )}
         </Button>
       </div>
@@ -76,17 +90,34 @@ export function MaterialCard({ material, onDelete, deleting }: MaterialCardProps
       </div>
 
       {material.parse_status === "ready" && (
+        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Sparkles className="h-3 w-3 text-primary" />
+          <span>
+            AI 已切片 {material.chunk_count} 段
+            {embeddingModel ? ` · ${embeddingModel}` : ""} · 对话时可勾选引用
+          </span>
+        </p>
+      )}
+      {(material.parse_status === "pending" ||
+        material.parse_status === "processing") && (
         <p className="text-xs text-muted-foreground">
-          已切片 {material.chunk_count} 段 · 在和老师对话时可勾选引用
+          {material.parse_status === "pending"
+            ? "等待 AI 切片中"
+            : `AI 正在向量化${embeddingModel ? " · " + embeddingModel : ""}`}
         </p>
       )}
       {material.parse_status === "failed" && material.parse_error && (
-        <p className="line-clamp-2 text-xs text-destructive" title={material.parse_error}>
+        <p
+          className="line-clamp-2 text-xs text-destructive"
+          title={material.parse_error}
+        >
           解析失败:{material.parse_error}
         </p>
       )}
       {material.summary && material.parse_status === "ready" && (
-        <p className="line-clamp-2 text-xs text-muted-foreground/80">{material.summary}</p>
+        <p className="line-clamp-2 text-xs text-muted-foreground/80">
+          {material.summary}
+        </p>
       )}
     </div>
   );
@@ -95,7 +126,10 @@ export function MaterialCard({ material, onDelete, deleting }: MaterialCardProps
 function StatusBadge({ status }: { status: ParseStatus }) {
   if (status === "ready") {
     return (
-      <Badge className="gap-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+      <Badge
+        variant="outline"
+        className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700"
+      >
         <CheckCircle2 className="h-3 w-3" />
         可用
       </Badge>
@@ -103,7 +137,10 @@ function StatusBadge({ status }: { status: ParseStatus }) {
   }
   if (status === "failed") {
     return (
-      <Badge variant="destructive" className="gap-1">
+      <Badge
+        variant="outline"
+        className="gap-1 border-destructive/30 bg-destructive/5 text-destructive"
+      >
         <AlertCircle className="h-3 w-3" />
         失败
       </Badge>
@@ -111,21 +148,19 @@ function StatusBadge({ status }: { status: ParseStatus }) {
   }
   return (
     <Badge
+      variant="outline"
       className={cn(
-        "gap-1",
-        status === "pending"
-          ? "bg-amber-100 text-amber-700 hover:bg-amber-100"
-          : "bg-sky-100 text-sky-700 hover:bg-sky-100",
+        "gap-1 border-primary/20 bg-primary/5 text-primary",
+        status === "processing" && "animate-pulse",
       )}
     >
       <Loader2 className="h-3 w-3 animate-spin" />
-      {status === "pending" ? "排队中" : "正在切片"}
+      {status === "pending" ? "排队中" : "AI 切片中"}
     </Badge>
   );
 }
 
 function subjectLabel(id: string): string {
-  // 简单中文化,后续可以从 subjects 列表反查
   if (id === "math") return "数学";
   if (id === "english") return "英语";
   if (id === "chinese") return "语文";

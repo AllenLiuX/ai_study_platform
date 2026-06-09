@@ -12,7 +12,7 @@ import { SubjectProgressCard } from "@/components/SubjectProgressCard";
 import { TaskCard, type TaskCardData } from "@/components/TaskCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AGENTS, AGENT_ORDER } from "@/lib/agents";
-import { chatApi, studentApi } from "@/lib/api";
+import { chatApi, metaApi, studentApi } from "@/lib/api";
 import type { AgentType } from "@/lib/types";
 
 const PLACEHOLDER_TASKS: TaskCardData[] = [
@@ -22,16 +22,13 @@ const PLACEHOLDER_TASKS: TaskCardData[] = [
       "5 分钟同步一下你这周的考试 / 作业,班主任会帮你列出每天 1-2 件最重要的事。",
     subject: "学习规划",
     estimatedMinutes: 5,
-    accent: "primary",
     tag: "必做",
   },
   {
     title: "找数学老师讲一个最近卡住的知识点",
-    description:
-      "从一道题切入,我们一步一步把这一类题型搞清楚。",
+    description: "从一道题切入,我们一步一步把这一类题型搞清楚。",
     subject: "数学",
     estimatedMinutes: 20,
-    accent: "amber",
     tag: "薄弱",
   },
   {
@@ -39,7 +36,6 @@ const PLACEHOLDER_TASKS: TaskCardData[] = [
     description: "可以丢一句不会的句子给我,也可以发一段阅读题。",
     subject: "英语",
     estimatedMinutes: 15,
-    accent: "emerald",
     tag: "复习",
   },
 ];
@@ -50,6 +46,16 @@ export default function DashboardPage() {
     queryKey: ["dashboard"],
     queryFn: studentApi.getDashboard,
   });
+
+  const configQuery = useQuery({
+    queryKey: ["meta-config"],
+    queryFn: metaApi.config,
+    staleTime: 5 * 60_000,
+  });
+  const models = configQuery.data?.models;
+  const modelStack = models
+    ? `${models.default} · ${models.premium} · ${models.embedding}`
+    : undefined;
 
   useEffect(() => {
     if (dashboardQuery.data?.profile.onboarding_completed === false) {
@@ -80,7 +86,10 @@ export default function DashboardPage() {
           <ErrorState message={(dashboardQuery.error as Error).message} />
         ) : dashboardQuery.data ? (
           <div className="space-y-8 animate-fade-in">
-            <StudentHeader profile={dashboardQuery.data.profile} />
+            <StudentHeader
+              profile={dashboardQuery.data.profile}
+              modelStack={modelStack}
+            />
 
             <section className="space-y-3">
               <SectionTitle
@@ -108,7 +117,10 @@ export default function DashboardPage() {
 
             <section className="space-y-3">
               <SectionTitle title="班主任" />
-              <HeadTeacherCard onEnter={() => enterAgent("head_teacher")} />
+              <HeadTeacherCard
+                onEnter={() => enterAgent("head_teacher")}
+                modelLabel={models?.default}
+              />
             </section>
 
             <section className="space-y-3">

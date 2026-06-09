@@ -45,6 +45,30 @@ async function request<T>(
 }
 
 // -----------------------------------------------------------------------------
+// Meta (公开,无需登录;用于在 UI 中显示当前 AI 栈)
+// -----------------------------------------------------------------------------
+export interface ModelInfo {
+  default: string;
+  premium: string;
+  embedding: string;
+}
+
+export interface HealthConfig {
+  openai_configured: boolean;
+  supabase_configured: boolean;
+  models: ModelInfo;
+  cors_origins: string[];
+}
+
+export const metaApi = {
+  config: async (): Promise<HealthConfig> => {
+    const resp = await fetch(`${API_BASE}/health/config`);
+    if (!resp.ok) throw new Error(`health/config ${resp.status}`);
+    return (await resp.json()) as HealthConfig;
+  },
+};
+
+// -----------------------------------------------------------------------------
 // Student
 // -----------------------------------------------------------------------------
 export const studentApi = {
@@ -121,11 +145,15 @@ export const materialsApi = {
 // SSE 发送消息
 // -----------------------------------------------------------------------------
 export interface SendMessageHandlers {
-  onReady?: (info: { agent_type: string }) => void;
+  onReady?: (info: { agent_type: string; model?: string }) => void;
   onCitations?: (citations: Citation[]) => void;
   onWarning?: (message: string) => void;
   onDelta: (text: string) => void;
-  onDone?: (info: { length: number; citation_count?: number }) => void;
+  onDone?: (info: {
+    length: number;
+    citation_count?: number;
+    model?: string;
+  }) => void;
   onError?: (message: string) => void;
 }
 

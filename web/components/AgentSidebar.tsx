@@ -66,8 +66,10 @@ export function AgentSidebar({
             >
               <span
                 className={cn(
-                  "flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br text-base text-white shadow-sm",
-                  agent.gradient,
+                  "flex h-9 w-9 items-center justify-center rounded-xl border text-base transition",
+                  isActive
+                    ? "border-primary/30 bg-primary/10 text-primary"
+                    : "border-border bg-secondary text-foreground/80",
                 )}
               >
                 {agent.emoji}

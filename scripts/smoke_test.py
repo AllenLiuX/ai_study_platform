@@ -220,6 +220,8 @@ def main() -> int:
                 got_ready = False
                 got_done = False
                 got_delta = False
+                ready_model: str | None = None
+                done_model: str | None = None
                 error_msg: str | None = None
                 with c.stream(
                     "POST",
@@ -241,15 +243,22 @@ def main() -> int:
                                 payload = json.loads(raw[5:].strip() or "{}")
                                 if current == "ready":
                                     got_ready = True
+                                    ready_model = payload.get("model")
                                 elif current == "delta":
                                     got_delta = True
                                 elif current == "done":
                                     got_done = True
+                                    done_model = payload.get("model")
                                 elif current == "error":
                                     error_msg = str(payload)
                 check(f"{agent_type} SSE 收到 ready", got_ready, error_msg or "")
                 check(f"{agent_type} SSE 收到 delta", got_delta, error_msg or "")
                 check(f"{agent_type} SSE 收到 done", got_done, error_msg or "")
+                check(
+                    f"{agent_type} SSE ready/done 携带 model",
+                    bool(ready_model) and bool(done_model),
+                    f"ready={ready_model} done={done_model}",
+                )
 
                 r = c.get(f"{BASE}/api/chat/sessions/{sid}/messages", headers=H)
                 msgs = r.json()
@@ -258,6 +267,20 @@ def main() -> int:
                     len(msgs) == 3
                     and {m["role"] for m in msgs} == {"assistant", "user"}
                     and sum(1 for m in msgs if m["role"] == "user") == 1,
+                )
+                assistant_msgs = [
+                    m for m in msgs if m["role"] == "assistant" and m.get("metadata")
+                ]
+                non_welcome = [
+                    m
+                    for m in assistant_msgs
+                    if (m.get("metadata") or {}).get("kind") != "welcome"
+                ]
+                check(
+                    f"{agent_type} 落库 assistant.metadata.model",
+                    bool(non_welcome)
+                    and (non_welcome[-1].get("metadata") or {}).get("model"),
+                    f"metadata={non_welcome[-1].get('metadata') if non_welcome else None}",
                 )
 
     finally:

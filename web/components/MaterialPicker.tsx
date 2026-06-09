@@ -120,11 +120,11 @@ export function MaterialPicker({
       </div>
 
       {open && (
-        <div className="max-h-60 overflow-y-auto rounded-xl border border-border/70 bg-background/95 p-2 shadow-card scrollbar-thin">
+        <div className="max-h-60 overflow-y-auto rounded-xl border border-border bg-card p-2 shadow-card scrollbar-thin">
           <div className="mb-2 flex items-center justify-between px-1.5 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1 text-primary">
               <Library className="h-3 w-3" />
-              你的资料库 (勾选若干份让老师基于它们回答)
+              你的 AI 资料库 (勾选后老师将基于它们回答)
             </span>
             <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setOpen(false)}>
               收起

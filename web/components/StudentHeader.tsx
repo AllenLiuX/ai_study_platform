@@ -7,6 +7,8 @@ import type { StudentProfile } from "@/lib/types";
 
 interface StudentHeaderProps {
   profile: StudentProfile;
+  /** 当前 AI 栈,例如 "gpt-4o-mini · text-embedding-3-small" */
+  modelStack?: string;
 }
 
 function timeBasedGreeting(): string {
@@ -19,14 +21,13 @@ function timeBasedGreeting(): string {
   return "夜深了,早点休息";
 }
 
-export function StudentHeader({ profile }: StudentHeaderProps) {
+export function StudentHeader({ profile, modelStack }: StudentHeaderProps) {
   const greeting = timeBasedGreeting();
   return (
-    <section className="rounded-3xl border border-border/60 bg-gradient-to-br from-indigo-50 via-white to-amber-50 p-6 shadow-card sm:p-8">
+    <section className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Sparkles className="h-4 w-4 text-amber-500" />
             <span>{greeting},很高兴又见到你</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
@@ -38,7 +39,7 @@ export function StudentHeader({ profile }: StudentHeaderProps) {
               <Badge variant="secondary">{profile.textbook_version}</Badge>
             )}
             {profile.target_exam && (
-              <Badge variant="accent">目标:{profile.target_exam}</Badge>
+              <Badge variant="secondary">目标 · {profile.target_exam}</Badge>
             )}
           </div>
           {profile.learning_goal && (
@@ -48,6 +49,15 @@ export function StudentHeader({ profile }: StudentHeaderProps) {
             </p>
           )}
         </div>
+        {modelStack && (
+          <div className="rounded-2xl border border-primary/15 bg-primary/5 px-3 py-2 text-xs">
+            <div className="flex items-center gap-1.5 font-medium text-primary">
+              <Sparkles className="h-3.5 w-3.5" />
+              AI 学习栈
+            </div>
+            <div className="mt-0.5 text-muted-foreground">{modelStack}</div>
+          </div>
+        )}
       </div>
     </section>
   );

@@ -47,7 +47,7 @@ export function AppHeader({ className }: AppHeaderProps) {
       <div className="container flex h-16 items-center justify-between">
         <div className="flex items-center gap-5">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-white">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-foreground text-background">
               <Sparkles className="h-5 w-5" />
             </span>
             <span className="font-semibold tracking-tight">学习驾驶舱</span>

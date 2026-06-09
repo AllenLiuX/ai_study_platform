@@ -69,8 +69,9 @@ const config: Config = {
         sm: "calc(var(--radius) - 6px)",
       },
       boxShadow: {
-        card: "0 4px 20px -10px rgba(67, 56, 202, 0.15)",
-        focus: "0 0 0 4px rgba(99, 102, 241, 0.15)",
+        card: "0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -16px rgba(15, 23, 42, 0.12)",
+        focus: "0 0 0 4px rgba(79, 70, 229, 0.18)",
+        glow: "0 0 0 1px rgba(79, 70, 229, 0.15), 0 8px 28px -12px rgba(79, 70, 229, 0.25)",
       },
       keyframes: {
         "accordion-down": {
@@ -85,11 +86,16 @@ const config: Config = {
           "0%": { opacity: "0", transform: "translateY(4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        shimmer: {
+          "0%": { backgroundPosition: "-200% 0" },
+          "100%": { backgroundPosition: "200% 0" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-in": "fade-in 0.25s ease-out both",
+        shimmer: "shimmer 2.4s linear infinite",
       },
     },
   },

@@ -247,8 +247,10 @@ export default function OnboardingPage() {
                   >
                     <div
                       className={cn(
-                        "flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br text-2xl text-white",
-                        agent.gradient,
+                        "flex h-12 w-12 items-center justify-center rounded-xl text-2xl transition",
+                        selected
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-foreground text-background",
                       )}
                     >
                       {agent.emoji}

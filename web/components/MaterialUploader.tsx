@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Loader2, Upload } from "lucide-react";
+import { FileText, Loader2, Sparkles, Upload } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -27,9 +27,15 @@ const MAX_MB = 20;
 interface MaterialUploaderProps {
   subjects: Subject[];
   onUploaded: (m: Material) => void;
+  /** 当前 embedding 模型,展示到帮助文案里 */
+  embeddingModel?: string;
 }
 
-export function MaterialUploader({ subjects, onUploaded }: MaterialUploaderProps) {
+export function MaterialUploader({
+  subjects,
+  onUploaded,
+  embeddingModel,
+}: MaterialUploaderProps) {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [subjectId, setSubjectId] = useState<string | undefined>(undefined);
@@ -76,11 +82,19 @@ export function MaterialUploader({ subjects, onUploaded }: MaterialUploaderProps
   }
 
   return (
-    <div className="space-y-4 rounded-2xl border border-border/70 bg-card p-5 shadow-card">
+    <div className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-card">
       <div>
-        <h3 className="text-base font-semibold">上传一份资料</h3>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-base font-semibold">上传一份资料</h3>
+          {embeddingModel && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-primary/15 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary">
+              <Sparkles className="h-3 w-3" />
+              {embeddingModel}
+            </span>
+          )}
+        </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          支持 PDF / TXT / Markdown,最大 {MAX_MB}MB。上传后会自动切片并向量化,
+          支持 PDF / TXT / Markdown,最大 {MAX_MB}MB。上传后 AI 会自动切片并向量化,
           之后在和老师对话时可以勾选这份资料让 AI 基于它回答。
         </p>
       </div>
@@ -99,15 +113,15 @@ export function MaterialUploader({ subjects, onUploaded }: MaterialUploaderProps
           if (f) pickFile(f);
         }}
         className={cn(
-          "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/70 bg-background/60 px-6 py-8 text-center transition",
+          "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border bg-background/60 px-6 py-8 text-center transition",
           "hover:border-primary/50 hover:bg-primary/5",
           dragOver && "border-primary bg-primary/5",
-          file && "border-emerald-300 bg-emerald-50/40",
+          file && "border-primary/40 bg-primary/5",
         )}
       >
         {file ? (
           <>
-            <FileText className="h-7 w-7 text-emerald-500" />
+            <FileText className="h-7 w-7 text-primary" />
             <div className="text-sm font-medium">{file.name}</div>
             <div className="text-xs text-muted-foreground">
               {(file.size / 1024).toFixed(1)} KB · 点击或拖拽更换
@@ -200,8 +214,8 @@ export function MaterialUploader({ subjects, onUploaded }: MaterialUploaderProps
             </>
           ) : (
             <>
-              <Upload className="mr-1.5 h-4 w-4" />
-              上传并向量化
+              <Sparkles className="mr-1.5 h-4 w-4" />
+              上传并交给 AI 切片
             </>
           )}
         </Button>

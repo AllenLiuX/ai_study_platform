@@ -1,39 +1,45 @@
 "use client";
 
+import { Sparkles } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AgentMeta } from "@/lib/agents";
 import type { StudentProfile } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 interface StudentProfilePanelProps {
   profile: StudentProfile | null;
   agent: AgentMeta;
+  modelLabel?: string;
 }
 
 export function StudentProfilePanel({
   profile,
   agent,
+  modelLabel,
 }: StudentProfilePanelProps) {
   return (
     <aside className="hidden h-full w-80 shrink-0 overflow-y-auto border-l border-border/60 bg-background/60 px-5 py-6 scrollbar-thin lg:block">
       <div className="space-y-6">
         <section>
           <div className="mb-3 flex items-center gap-3">
-            <span
-              className={cn(
-                "flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br text-lg text-white",
-                agent.gradient,
-              )}
-            >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-foreground text-lg text-background">
               {agent.emoji}
             </span>
-            <div>
-              <div className="text-sm text-muted-foreground">当前老师</div>
-              <div className="font-semibold">{agent.displayName}</div>
+            <div className="min-w-0">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                当前老师
+              </div>
+              <div className="truncate font-semibold">{agent.displayName}</div>
             </div>
           </div>
           <p className="text-sm text-muted-foreground">{agent.tagline}</p>
+          {modelLabel && (
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-primary/15 bg-primary/5 px-2.5 py-1 text-[11px] font-medium text-primary">
+              <Sparkles className="h-3 w-3" />
+              {modelLabel}
+            </div>
+          )}
         </section>
 
         <section className="space-y-2">

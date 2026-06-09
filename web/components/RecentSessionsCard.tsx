@@ -57,12 +57,7 @@ export function RecentSessionsCard({
                     )}
                   >
                     <div className="flex min-w-0 items-center gap-3">
-                      <span
-                        className={cn(
-                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-base text-white",
-                          agent.gradient,
-                        )}
-                      >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-secondary text-base">
                         {agent.emoji}
                       </span>
                       <div className="min-w-0">

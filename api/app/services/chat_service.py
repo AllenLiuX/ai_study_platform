@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 
 from ..agents.registry import AgentConfig, get_agent
 from ..agents.runtime import stream_reply
+from ..core.llm import resolve_model
 from ..db import repos
 from ..schemas.chat import CreateSessionRequest
 from .retrieval import RetrievedChunk, format_context, retrieve_chunks
@@ -116,7 +117,11 @@ async def stream_assistant_reply(
     assistant_text_parts: list[str] = []
     citations: list[RetrievedChunk] = []
     try:
-        yield _sse("ready", {"agent_type": agent.agent_type})
+        model_name = resolve_model(agent.tier)
+        yield _sse(
+            "ready",
+            {"agent_type": agent.agent_type, "model": model_name},
+        )
 
         rag_context: str | None = None
         if material_ids is not None and len(material_ids) > 0:
@@ -157,6 +162,7 @@ async def stream_assistant_reply(
         if full_text:
             assistant_meta: dict = {
                 "model_tier": agent.tier.value,
+                "model": resolve_model(agent.tier),
                 "agent_type": agent.agent_type,
             }
             if citations:
@@ -179,7 +185,11 @@ async def stream_assistant_reply(
 
         yield _sse(
             "done",
-            {"length": len(full_text), "citation_count": len(citations)},
+            {
+                "length": len(full_text),
+                "citation_count": len(citations),
+                "model": model_name,
+            },
         )
     except Exception as exc:
         logger.exception("LLM stream failed")

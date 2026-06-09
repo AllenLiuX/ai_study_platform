@@ -55,6 +55,7 @@ export interface ChatMessage {
     citations?: Citation[];
     material_ids?: string[];
     agent_type?: AgentType;
+    model?: string;
     model_tier?: string;
     [key: string]: unknown;
   };

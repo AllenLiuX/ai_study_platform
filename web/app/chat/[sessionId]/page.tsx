@@ -9,10 +9,17 @@ import { AppHeader } from "@/components/AppHeader";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatWindow } from "@/components/ChatWindow";
 import { MaterialPicker } from "@/components/MaterialPicker";
+import { ModelBadge } from "@/components/ModelBadge";
 import { StudentProfilePanel } from "@/components/StudentProfilePanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AGENTS } from "@/lib/agents";
-import { chatApi, materialsApi, sendMessageStream, studentApi } from "@/lib/api";
+import {
+  chatApi,
+  materialsApi,
+  metaApi,
+  sendMessageStream,
+  studentApi,
+} from "@/lib/api";
 import type { AgentType, ChatMessage, Citation } from "@/lib/types";
 
 export default function ChatSessionPage() {
@@ -41,6 +48,13 @@ export default function ChatSessionPage() {
     queryKey: ["materials"],
     queryFn: materialsApi.list,
   });
+
+  const configQuery = useQuery({
+    queryKey: ["meta-config"],
+    queryFn: metaApi.config,
+    staleTime: 5 * 60_000,
+  });
+  const chatModel = configQuery.data?.models.default;
 
   const session = useMemo(
     () => sessionsQuery.data?.find((s) => s.id === sessionId),
@@ -172,6 +186,18 @@ export default function ChatSessionPage() {
         />
 
         <div className="flex flex-1 flex-col">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-background/70 px-4 py-2 backdrop-blur sm:px-6">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-foreground text-xs text-background">
+                {agent.emoji}
+              </span>
+              <span className="font-semibold">{agent.displayName}</span>
+              <span className="hidden text-xs text-muted-foreground sm:inline">
+                · {agent.role}
+              </span>
+            </div>
+            {chatModel && <ModelBadge model={chatModel} label="对话" />}
+          </div>
           {loading ? (
             <div className="flex-1 space-y-4 p-6">
               <Skeleton className="h-12 w-2/3" />
@@ -181,7 +207,7 @@ export default function ChatSessionPage() {
           ) : (
             <>
               {streamingWarning && (
-                <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+                <div className="border-b border-accent-foreground/10 bg-accent px-4 py-2 text-xs text-accent-foreground">
                   {streamingWarning}
                 </div>
               )}
@@ -191,6 +217,7 @@ export default function ChatSessionPage() {
                 streamingText={streamingText}
                 streamingCitations={streamingCitations}
                 isStreaming={isStreaming}
+                modelLabel={chatModel}
               />
             </>
           )}
@@ -214,6 +241,7 @@ export default function ChatSessionPage() {
         <StudentProfilePanel
           profile={profileQuery.data ?? null}
           agent={agent}
+          modelLabel={chatModel}
         />
       </div>
     </div>

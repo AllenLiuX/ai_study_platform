@@ -5,10 +5,11 @@ export interface AgentMeta {
   displayName: string;
   shortName: string;
   subjectId: string | null;
-  /** Tailwind 渐变色,用于卡片/头像 */
-  gradient: string;
-  /** 强调色,用于按钮 hover、徽章 */
-  accent: string;
+  /**
+   * 角色定位:用于在 chat 顶栏显示 "AI · <role>"。
+   * 设计上不再用彩色渐变,所有 Agent 共享同一品牌色,靠 emoji + 名字 + 角色定位区分。
+   */
+  role: string;
   emoji: string;
   /** 一句话描述 */
   tagline: string;
@@ -22,8 +23,7 @@ export const AGENTS: Record<AgentType, AgentMeta> = {
     displayName: "AI 班主任",
     shortName: "班主任",
     subjectId: null,
-    gradient: "from-indigo-500 to-violet-500",
-    accent: "text-indigo-600",
+    role: "学习规划与全局诊断",
     emoji: "🧭",
     tagline: "帮你做规划、汇总薄弱点、安排学习节奏",
     starterPrompts: [
@@ -37,8 +37,7 @@ export const AGENTS: Record<AgentType, AgentMeta> = {
     displayName: "数学老师",
     shortName: "数学",
     subjectId: "math",
-    gradient: "from-blue-500 to-cyan-500",
-    accent: "text-blue-600",
+    role: "数学讲解与分步推导",
     emoji: "📐",
     tagline: "讲解概念、分步推导、引导独立思考",
     starterPrompts: [
@@ -52,8 +51,7 @@ export const AGENTS: Record<AgentType, AgentMeta> = {
     displayName: "英语老师",
     shortName: "英语",
     subjectId: "english",
-    gradient: "from-emerald-500 to-teal-500",
-    accent: "text-emerald-600",
+    role: "英语语法、阅读与作文",
     emoji: "✍️",
     tagline: "讲语法、改作文、分析阅读、讲单词",
     starterPrompts: [
@@ -67,8 +65,7 @@ export const AGENTS: Record<AgentType, AgentMeta> = {
     displayName: "语文老师",
     shortName: "语文",
     subjectId: "chinese",
-    gradient: "from-rose-500 to-orange-500",
-    accent: "text-rose-600",
+    role: "语文阅读、文言与作文",
     emoji: "📖",
     tagline: "阅读理解、文言文、古诗词、作文构思",
     starterPrompts: [

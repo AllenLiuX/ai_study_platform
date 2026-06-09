@@ -7,8 +7,9 @@ import { useEffect, useMemo } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { MaterialCard } from "@/components/MaterialCard";
 import { MaterialUploader } from "@/components/MaterialUploader";
+import { ModelBadge } from "@/components/ModelBadge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { materialsApi, studentApi } from "@/lib/api";
+import { materialsApi, metaApi, studentApi } from "@/lib/api";
 import type { Material } from "@/lib/types";
 
 export default function MaterialsPage() {
@@ -39,6 +40,13 @@ export default function MaterialsPage() {
     },
   });
 
+  const configQuery = useQuery({
+    queryKey: ["meta-config"],
+    queryFn: metaApi.config,
+    staleTime: 5 * 60_000,
+  });
+  const embeddingModel = configQuery.data?.models.embedding;
+
   const materials = materialsQuery.data ?? [];
   const readyCount = useMemo(
     () => materials.filter((m) => m.parse_status === "ready").length,
@@ -63,12 +71,17 @@ export default function MaterialsPage() {
       <AppHeader />
 
       <main className="container flex-1 py-8">
-        <div className="mb-6 flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-primary">
-            <Library className="h-5 w-5" />
-            <span className="text-xs font-medium uppercase tracking-wider">
-              Knowledge Base
-            </span>
+        <div className="mb-6 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Library className="h-5 w-5" />
+              <span className="text-xs font-medium uppercase tracking-wider">
+                Knowledge Base
+              </span>
+            </div>
+            {embeddingModel && (
+              <ModelBadge model={embeddingModel} label="切片 / 向量化" />
+            )}
           </div>
           <h1 className="text-2xl font-bold tracking-tight">我的资料库</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
@@ -79,14 +92,17 @@ export default function MaterialsPage() {
           {materials.length > 0 && (
             <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
               <span>共 {materials.length} 份资料</span>
-              <span>·</span>
-              <span className="text-emerald-600">{readyCount} 份可用</span>
+              <span className="text-border">·</span>
+              <span className="flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {readyCount} 份可用
+              </span>
               {processingCount > 0 && (
                 <>
-                  <span>·</span>
-                  <span className="flex items-center gap-1 text-sky-600">
+                  <span className="text-border">·</span>
+                  <span className="flex items-center gap-1 text-primary">
                     <Loader2 className="h-3 w-3 animate-spin" />
-                    {processingCount} 份处理中
+                    {processingCount} 份 AI 处理中
                   </span>
                 </>
               )}
@@ -97,6 +113,7 @@ export default function MaterialsPage() {
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
           <MaterialUploader
             subjects={subjectsQuery.data ?? []}
+            embeddingModel={embeddingModel}
             onUploaded={(m) => {
               queryClient.setQueryData<Material[]>(["materials"], (prev) => [
                 m,
@@ -129,6 +146,7 @@ export default function MaterialsPage() {
                   <MaterialCard
                     key={m.id}
                     material={m}
+                    embeddingModel={embeddingModel}
                     onDelete={() => deleteMutation.mutate(m.id)}
                     deleting={
                       deleteMutation.isPending && deleteMutation.variables === m.id

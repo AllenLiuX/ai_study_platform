@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import type { AgentMeta } from "@/lib/agents";
-import { cn } from "@/lib/utils";
 
 interface SubjectProgressCardProps {
   agent: AgentMeta;
@@ -29,26 +28,22 @@ export function SubjectProgressCard({
   const hasData = typeof mastery === "number";
 
   return (
-    <Card className="overflow-hidden transition hover:-translate-y-0.5 hover:shadow-lg">
-      <div
-        className={cn(
-          "flex items-center justify-between bg-gradient-to-br px-5 py-4 text-white",
-          agent.gradient,
-        )}
-      >
-        <div className="flex items-center gap-3">
-          <span className="text-2xl">{agent.emoji}</span>
-          <div>
-            <div className="text-sm opacity-80">{agent.subjectId}</div>
-            <div className="text-lg font-semibold">{agent.displayName}</div>
+    <Card className="group overflow-hidden transition hover:-translate-y-0.5 hover:shadow-card">
+      <div className="flex items-center justify-between border-b border-border bg-secondary/60 px-5 py-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-foreground text-lg text-background">
+            {agent.emoji}
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-xs uppercase tracking-wide text-muted-foreground">
+              {agent.role}
+            </div>
+            <div className="truncate text-base font-semibold">
+              {agent.displayName}
+            </div>
           </div>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="border-white/20 bg-white/15 text-white hover:bg-white/25"
-          onClick={onEnter}
-        >
+        <Button variant="ghost" size="sm" onClick={onEnter}>
           找老师
           <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
@@ -64,7 +59,9 @@ export function SubjectProgressCard({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>掌握度</span>
-            <span>{hasData ? `${mastery}%` : "待评估"}</span>
+            <span className="font-medium text-foreground">
+              {hasData ? `${mastery}%` : "待评估"}
+            </span>
           </div>
           <Progress value={hasData ? mastery! : 0} />
         </div>
