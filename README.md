@@ -41,12 +41,33 @@
 - [x] Chat 输入框上方 `MaterialPicker`,勾选若干份资料就能让老师基于它们回答
 - [x] **Markdown 对话渲染**:`react-markdown` + GFM (表格 / 删除线 / 任务列表) + KaTeX 数学公式 (`$x^2+1=0$`, `$$\frac{a}{b}$$`),数学老师终于能写公式了
 
+### Phase 1 polish — 视觉与 AI 可见性 ✅
+
+- [x] 重做色彩系统 "Studied Indigo":单一品牌色 indigo-600 + slate 灰阶,告别七彩渐变
+- [x] 所有 Agent 头像 monochrome,靠 emoji + 名字区分,UI 更高级、不再"五颜六色"
+- [x] 新建 `<ModelBadge>` 组件;在 Dashboard / Chat 顶栏 / 消息脚注 / 资料页都显式标注 `gpt-4o-mini` / `text-embedding-3-small` 等
+- [x] SSE `ready` / `done` 事件携带 `model` 字段;assistant 消息 metadata 持久化 `model`
+
+### Phase 1.5 — 平台公共资料 ✅
+
+让所有学生开箱就能用到一份「AI 自动生成的初中讲义库」,同时各自的私有资料完全隔离。
+
+- [x] DB schema 早已支持:`owner_type='platform' | 'student'`,RLS 让所有用户可读 platform,只能改/删自己的
+- [x] `match_material_chunks` RPC 在 SQL 层就处理了 platform 资料的检索可见性
+- [x] **课标骨架** ([seed-data/curriculum/](seed-data/curriculum/)):三科各 ~17 个核心知识点,基于 2022 义务教育课程标准
+- [x] `scripts/generate_knowledge_notes.py`:用 `gpt-4o` 基于课标骨架批量生成 markdown 讲义,产出到 `seed-data/platform/<subject>/`
+- [x] `scripts/seed_platform_materials.py`:用 service_role 把讲义上传到 Storage `platform/<uuid>.md` + 入库为 `owner_type='platform'` + 复用 `material_processor` 切片向量化
+- [x] **51 份 AI 讲义已入库**:数学 17 / 英语 17 / 语文 17,共 ~220 chunks
+- [x] 前端 `/materials` 重做:Tab 切换「我的资料」/「公共资料」;公共资料按学科筛选,带「公共 / AI 讲义」徽章,禁止删除
+- [x] `MaterialPicker` 分 section 显示两类资料;选中后后端 RAG 不需要区分
+- [x] `scripts/phase15_smoke.py`:12 项断言,验证新用户能看到 platform 资料 + 基于 platform 做 RAG + 不能删 platform
+
 ### 后续 Phase Roadmap
 
 - **Phase 2 — 学习进度沉淀**:`knowledge_points` 种子树 + 对话后用 LLM 抽取知识点和薄弱点 → 写入 `student_progress`;Dashboard 渲染真实掌握度
 - **Phase 3 — 任务系统 + 学习报告**:规则 + LLM 生成今日任务、周学习报告
 - **Phase 4 — 多模态**:图片(题目拍照)/ 手写公式 / 语音输入
-- **Phase 5 — 管理端 + 家长端**:平台公共资料、学生列表/对话日志、家长视角周报、内容安全审核
+- **Phase 5 — 管理端 + 家长端**:平台公共资料管理 UI、学生列表/对话日志、家长视角周报、内容安全审核
 
 ---
 
@@ -97,6 +118,17 @@ student_coach/
       0001_phase0_init.sql
       0002_phase1_materials.sql
     seed.sql               # 种子学科数据
+  seed-data/               # 平台公共资料 (Phase 1.5)
+    curriculum/            # 课标骨架 yaml (人工维护)
+    platform/<subject>/    # AI 生成的 markdown 讲义 (gen 出来的)
+  scripts/
+    dev.sh                          # 一键启动前后端
+    smoke_test.py                   # Phase 0 后端冒烟
+    phase1_smoke.py                 # Phase 1 (RAG) 后端冒烟
+    phase15_smoke.py                # Phase 1.5 (公共资料) 后端冒烟
+    frontend_smoke.py               # 前端路由 + 中间件冒烟
+    generate_knowledge_notes.py     # Phase 1.5: 基于课标生成 AI 讲义
+    seed_platform_materials.py      # Phase 1.5: 把讲义入库为 platform 资料
   web/                     # Next.js 前端
     app/
       (auth)/login         (auth)/signup
@@ -165,6 +197,23 @@ npm run dev
 
 后端文档:[http://localhost:8000/docs](http://localhost:8000/docs)
 后端自检:[http://localhost:8000/health/config](http://localhost:8000/health/config) — 会显示 OpenAI / Supabase 是否配置成功。
+
+### 2. (可选) 灌入平台公共资料
+
+让所有学生开箱就能用到 51 份 AI 生成的初中讲义:
+
+```bash
+# 1. 用 gpt-4o 生成讲义 (基于 seed-data/curriculum/*.yaml,约 100 秒)
+cd api && source .venv/bin/activate
+python ../scripts/generate_knowledge_notes.py --concurrency 6
+# 产物会在 seed-data/platform/<subject>/*.md
+
+# 2. 入库到 Supabase (上传 Storage + INSERT learning_materials + 切片向量化)
+python ../scripts/seed_platform_materials.py
+# 完成后访问 /materials → 切到「公共资料」tab 可以看到
+```
+
+幂等:已存在的同名 platform 资料默认跳过,加 `--force` 才删旧覆盖。
 
 ---
 

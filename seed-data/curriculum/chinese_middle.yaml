@@ -1,0 +1,125 @@
+# 初中语文 · 核心知识点骨架 (基于 2022 课标)
+subject_id: chinese
+stage: 初中
+grade_range: 七年级—九年级
+material_type: handout
+generator_persona: |
+  你是一名有十年经验的初中语文老师,正在为「面向初中生的 AI 学习讲义」撰写章节。
+  讲义会被 AI 班主任 + 语文老师用作 RAG 知识库。请:
+  - 不引用任何具体教材篇目的原文 (古诗文除外,但只引用早已进入公有领域的篇目)
+  - 自己编例句、自己列分析示范,不取自教辅
+  - 文风温和,带启发性问题,让学生主动思考
+  - 多写"评分采分点 / 阅卷老师怎么看"这类应试视角
+
+template: |
+  # {title}
+
+  > 学段:初中 · 学科:语文 · 由 AI 基于 2022 课标生成
+  >
+  > 学习目标:{learning_objective}
+
+  ## 一、知识与方法
+
+  ...先讲"是什么 / 为什么重要",再讲"怎么辨认、怎么分析"...
+
+  ## 二、典型例子
+
+  ...3-5 个自己编的例句或片段,逐句分析...
+
+  ## 三、答题模板
+
+  ...给一个或多个考试答题模板,告诉学生"踩分点是什么,顺序怎么写"...
+
+  ## 四、易混易错
+
+  ...3-5 条本知识点上的常见错误或混淆,每条配一句澄清...
+
+  ## 五、学习建议
+
+  ...一段建议,告诉学生该怎么积累 / 何时复习 / 怎么联系实际写作...
+
+topics:
+  - id: cn-classical-content-words
+    title: 文言文常见实词积累
+    learning_objective: 掌握初中阶段最常见的 ~100 个文言实词的核心义项
+    keywords: [实词, 一词多义, 古今异义, 通假字, 词类活用]
+
+  - id: cn-classical-function-words
+    title: 文言虚词 (之 / 其 / 而 / 以 / 于 / 为 / 乃 / 则 / 且 / 也)
+    learning_objective: 掌握 10 个核心文言虚词的常见义项与判别方法
+    keywords: [之, 其, 而, 以, 于, 为, 乃, 则, 且, 也]
+
+  - id: cn-classical-sentence-patterns
+    title: 文言文特殊句式
+    learning_objective: 识别并翻译判断 / 被动 / 倒装 / 省略 / 宾语前置等特殊句式
+    keywords: [判断句, 被动句, 倒装句, 省略句, 宾语前置]
+
+  - id: cn-rhetorical-devices
+    title: 修辞手法识别与分析
+    learning_objective: 掌握比喻 / 拟人 / 排比 / 对偶 / 反问 / 设问 / 夸张 等修辞的辨识与作用
+    keywords: [比喻, 拟人, 排比, 对偶, 反问, 设问, 夸张, 反复]
+
+  - id: cn-expression-techniques
+    title: 表达方式与表现手法
+    learning_objective: 区分记叙 / 描写 / 议论 / 抒情 / 说明五种表达方式,认识对比 / 烘托 / 象征等手法
+    keywords: [表达方式, 表现手法, 对比, 烘托, 象征, 衬托]
+
+  - id: cn-narrative-reading
+    title: 记叙文阅读
+    learning_objective: 掌握记叙文六要素、线索、人物分析、主旨概括的答题方法
+    keywords: [六要素, 线索, 人物形象, 情节, 主旨, 描写作用]
+
+  - id: cn-explanatory-reading
+    title: 说明文阅读
+    learning_objective: 掌握说明对象 / 说明顺序 / 说明方法及其作用的答题方法
+    keywords: [说明对象, 说明顺序, 列数字, 作比较, 打比方, 分类别]
+
+  - id: cn-argumentative-reading
+    title: 议论文阅读
+    learning_objective: 掌握论点 / 论据 / 论证三要素,会分析论证方法与文章结构
+    keywords: [论点, 论据, 论证, 举例论证, 道理论证, 对比论证]
+
+  - id: cn-prose-reading
+    title: 散文阅读
+    learning_objective: 把握散文 "形散神不散" 的特点,会分析情感线索、关键句作用、语言风格
+    keywords: [散文, 情感线索, 关键句, 语言赏析, 主旨]
+
+  - id: cn-novel-reading
+    title: 小说阅读 (情节 / 人物 / 环境)
+    learning_objective: 掌握小说三要素的分析方法,会做人物形象题与情节作用题
+    keywords: [小说三要素, 情节, 人物形象, 环境描写, 标题作用]
+
+  - id: cn-poetry-appreciation
+    title: 古诗词鉴赏方法
+    learning_objective: 掌握意象 / 意境 / 情感 / 手法的常见鉴赏角度与表达模板
+    keywords: [意象, 意境, 情感, 炼字, 表现手法]
+
+  - id: cn-recommended-poems
+    title: 初中必背古诗文要点
+    learning_objective: 把握课标要求背诵的核心古诗文的主题、名句和情感
+    keywords: [《观沧海》, 《登幽州台歌》, 《望岳》, 《使至塞上》, 《岳阳楼记》, 《醉翁亭记》, 《出师表》, 《爱莲说》, 《陋室铭》]
+
+  - id: cn-famous-books
+    title: 名著阅读核心要点 (公有领域作品)
+    learning_objective: 把握课标要求阅读的几部公有领域名著的主旨、人物与艺术特色
+    keywords: [《西游记》, 《水浒传》, 《朝花夕拾》, 《骆驼祥子》, 《海底两万里》, 《钢铁是怎样炼成的》, 《简·爱》]
+
+  - id: cn-病句-修改
+    title: 病句辨析与修改
+    learning_objective: 识别并修改成分残缺 / 搭配不当 / 语序不当 / 结构混乱 / 表意不明等典型病句
+    keywords: [成分残缺, 搭配不当, 语序不当, 结构混乱, 表意不明, 重复啰嗦]
+
+  - id: cn-pronunciation-glyph
+    title: 字音、字形与常用易错字
+    learning_objective: 积累中考常考的多音字、形近字与易写错字
+    keywords: [多音字, 形近字, 易错字, 注音规则]
+
+  - id: cn-narrative-writing
+    title: 记叙文写作
+    learning_objective: 掌握记叙文构思 / 选材 / 立意 / 详略安排的方法
+    keywords: [立意, 构思, 选材, 详略, 开头, 结尾, 点题]
+
+  - id: cn-argumentative-writing
+    title: 议论文写作
+    learning_objective: 掌握议论文的结构、论点提炼、论据使用与语言表达
+    keywords: [中心论点, 分论点, 论据, 论证结构, 议论性语言]

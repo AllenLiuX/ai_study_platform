@@ -16,10 +16,12 @@ import { cn } from "@/lib/utils";
 
 interface MaterialCardProps {
   material: Material;
-  onDelete: () => void;
+  onDelete?: () => void;
   deleting?: boolean;
   /** 当前 embedding 模型,用来在状态徽章 / 摘要中显式标出 AI */
   embeddingModel?: string;
+  /** 平台公共资料 / 不允许删除的资料 = true */
+  readOnly?: boolean;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -37,14 +39,23 @@ export function MaterialCard({
   onDelete,
   deleting,
   embeddingModel,
+  readOnly,
 }: MaterialCardProps) {
   const sizeKB = (material.size_bytes / 1024).toFixed(1);
   const ext = material.original_filename.split(".").pop()?.toUpperCase() ?? "";
+  const isPlatform = material.owner_type === "platform";
 
   return (
     <div className="group relative flex flex-col gap-3 rounded-2xl border border-border bg-card p-4 shadow-card transition hover:-translate-y-0.5">
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-secondary text-muted-foreground">
+        <div
+          className={cn(
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-muted-foreground",
+            isPlatform
+              ? "border-primary/20 bg-primary/5 text-primary"
+              : "border-border bg-secondary",
+          )}
+        >
           <FileText className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
@@ -55,24 +66,34 @@ export function MaterialCard({
             {material.original_filename}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground opacity-0 transition group-hover:opacity-100"
-          onClick={onDelete}
-          disabled={deleting}
-          title="删除"
-        >
-          {deleting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-        </Button>
+        {!readOnly && onDelete && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground opacity-0 transition group-hover:opacity-100"
+            onClick={onDelete}
+            disabled={deleting}
+            title="删除"
+          >
+            {deleting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
         <StatusBadge status={material.parse_status} />
+        {isPlatform && (
+          <Badge
+            variant="outline"
+            className="border-primary/20 bg-primary/5 text-primary"
+          >
+            公共
+          </Badge>
+        )}
         {material.subject_id && (
           <Badge variant="secondary" className="text-[10px]">
             {subjectLabel(material.subject_id)}

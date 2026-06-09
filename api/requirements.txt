@@ -11,3 +11,5 @@ python-multipart>=0.0.10
 # Phase 1: 资料解析与切片
 pypdf>=4.3.0
 tiktoken>=0.7.0
+# Phase 1.5: 平台公共资料生成 (读取课标 yaml)
+PyYAML>=6.0

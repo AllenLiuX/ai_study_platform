@@ -1,0 +1,131 @@
+# 初中数学 · 核心知识点骨架 (基于 2022 课标)
+# 每个 topic 会被生成器变成一份独立的平台公共资料
+subject_id: math
+stage: 初中
+grade_range: 七年级—九年级
+material_type: handout
+generator_persona: |
+  你是一名经验丰富的初中数学老师,正在为一份「面向初中生的 AI 学习讲义」撰写章节。
+  讲义会被一个 AI 班主任 + 数学老师作为 RAG 知识库使用,所以请:
+  - 不抄任何教材原文
+  - 概念定义要严谨,但语言要平实易懂
+  - 例题用通用题型,不取自任何特定教辅
+  - 多写易混淆点 / 易错点 / 学习建议
+  - 全程使用中文,数学公式用 LaTeX 写在 $...$ 或 $$...$$ 中
+
+template: |
+  # {title}
+
+  > 学段:初中 · 学科:数学 · 由 AI 基于 2022 课标生成
+  >
+  > 学习目标:{learning_objective}
+
+  ## 一、核心概念
+
+  ...用清晰、不抄教材的方式介绍主概念,给出严格定义、几何/代数双视角描述...
+
+  ## 二、关键公式与性质
+
+  ...列出该知识点最重要的 3-6 个公式或性质,每个用一两句说明它的"含义"和"什么时候用"...
+
+  ## 三、典型题型与解题思路
+
+  ...给 2-3 个有代表性的题型,每个题型:
+  - 题目特征
+  - 解题主线
+  - 一个简单的演示题 (自己出,不来自教辅)
+  - 解题过程与关键步骤...
+
+  ## 四、易混易错
+
+  ...列 3-5 条本知识点上初中生最常踩的坑,每条配 1-2 句澄清...
+
+  ## 五、学习建议
+
+  ...一段贴心的学习节奏建议,告诉学生先掌握什么、再练什么、何时回头复习...
+
+topics:
+  - id: math-rational-real-numbers
+    title: 有理数与实数
+    learning_objective: 理解有理数与实数的概念、运算性质,能在数轴上正确表示
+    keywords: [正负数, 数轴, 绝对值, 相反数, 平方根, 立方根, 无理数, 实数运算律]
+
+  - id: math-linear-equation
+    title: 一元一次方程
+    learning_objective: 会建立和求解一元一次方程,理解等式的基本性质
+    keywords: [方程, 等式性质, 移项, 合并同类项, 应用题建模]
+
+  - id: math-quadratic-equation
+    title: 一元二次方程
+    learning_objective: 能用配方法 / 公式法 / 因式分解法求解一元二次方程,理解判别式
+    keywords: [一元二次, 公式法, 配方法, 因式分解, 判别式 Δ, 根与系数关系]
+
+  - id: math-linear-equations-two-vars
+    title: 二元一次方程组
+    learning_objective: 会用代入消元法和加减消元法解二元一次方程组,能用它建模实际问题
+    keywords: [二元, 消元, 代入法, 加减法, 应用题]
+
+  - id: math-inequality
+    title: 不等式与不等式组
+    learning_objective: 理解不等式基本性质,会解一元一次不等式 (组) 并在数轴上表示
+    keywords: [不等号, 不等式性质, 解集, 数轴表示, 不等式组]
+
+  - id: math-polynomials-factoring
+    title: 整式运算与因式分解
+    learning_objective: 熟练进行整式加减乘除,掌握提公因式法、公式法等因式分解技巧
+    keywords: [整式, 单项式, 多项式, 乘法公式, 提公因式, 平方差, 完全平方]
+
+  - id: math-fractions
+    title: 分式与分式方程
+    learning_objective: 掌握分式的化简、运算,会解分式方程并检验
+    keywords: [分式, 通分, 约分, 分式方程, 增根检验]
+
+  - id: math-linear-function
+    title: 一次函数
+    learning_objective: 理解一次函数 $y = kx + b$ 的图像、性质,会用它建模简单实际问题
+    keywords: [一次函数, 斜率 k, 截距 b, 图像, 增减性, 应用题]
+
+  - id: math-inverse-proportion
+    title: 反比例函数
+    learning_objective: 理解反比例函数 $y = k/x$ 的图像、性质,能识别和应用
+    keywords: [反比例函数, 双曲线, 增减性, 对称性]
+
+  - id: math-quadratic-function
+    title: 二次函数
+    learning_objective: 掌握 $y = ax^2 + bx + c$ 的图像、性质,会求顶点、对称轴,能解最值与应用题
+    keywords: [二次函数, 抛物线, 顶点, 对称轴, 最值, 与一元二次方程的关系]
+
+  - id: math-triangle
+    title: 三角形 (全等与相似)
+    learning_objective: 掌握三角形性质、全等判定 (SSS/SAS/ASA/AAS/HL) 与相似判定
+    keywords: [全等, 相似, 边角关系, 内角和, 中线, 高线, 角平分线]
+
+  - id: math-pythagorean
+    title: 勾股定理
+    learning_objective: 理解并证明勾股定理及其逆定理,会用它解决实际几何与代数问题
+    keywords: [直角三角形, 勾股定理, 逆定理, 应用题]
+
+  - id: math-quadrilateral
+    title: 四边形 (平行四边形 / 矩形 / 菱形 / 正方形 / 梯形)
+    learning_objective: 掌握各种特殊四边形的判定与性质,理解它们的从属关系
+    keywords: [平行四边形, 矩形, 菱形, 正方形, 梯形, 中点四边形]
+
+  - id: math-circle
+    title: 圆
+    learning_objective: 掌握圆的基本概念、切线、圆心角与圆周角关系、扇形与圆锥
+    keywords: [圆, 半径, 弦, 切线, 圆心角, 圆周角, 弧长, 扇形面积]
+
+  - id: math-statistics-probability
+    title: 统计与概率
+    learning_objective: 会处理简单数据 (平均数 / 中位数 / 众数 / 方差),理解古典概型
+    keywords: [平均数, 中位数, 众数, 方差, 频率, 概率, 列举法, 树状图]
+
+  - id: math-trigonometry-acute
+    title: 锐角三角函数
+    learning_objective: 理解正弦、余弦、正切的定义,掌握特殊角三角函数值
+    keywords: [sin, cos, tan, 锐角, 特殊角, 解直角三角形]
+
+  - id: math-coordinate-system
+    title: 平面直角坐标系
+    learning_objective: 掌握直角坐标系中点的坐标、距离公式,理解函数图像的几何意义
+    keywords: [坐标系, 象限, 距离公式, 中点, 平移, 对称]

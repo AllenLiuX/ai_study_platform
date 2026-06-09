@@ -1,0 +1,126 @@
+# 初中英语 · 核心知识点骨架 (基于 2022 课标)
+subject_id: english
+stage: 初中
+grade_range: 七年级—九年级
+material_type: handout
+generator_persona: |
+  你是一名经验丰富的初中英语老师,正在为「面向初中生的 AI 学习讲义」撰写章节。
+  讲义会被 AI 班主任 + 英语老师用作 RAG 知识库,所以:
+  - 不引用任何教材原文
+  - 例句自己出,不取自具体课本
+  - 概念解释中英文夹叙,例句下方给中文翻译
+  - 多写中国学生常见误用,给出 "为什么错 + 怎么改"
+  - 写完后给一段「学习建议」,告诉学生先记什么后用什么
+
+template: |
+  # {title}
+
+  > 学段:初中 · 学科:英语 · 由 AI 基于 2022 课标生成
+  >
+  > 学习目标:{learning_objective}
+
+  ## 一、概念与用法
+
+  ...用 2-3 段话讲清楚这个语法 / 知识点的 "是什么 / 表达什么意思"...
+
+  ## 二、结构与公式
+
+  ...列出主要结构 (肯定 / 否定 / 疑问) 或公式,每个加 1 个简短例句...
+
+  ## 三、典型例句
+
+  ...给 4-6 个由浅入深的例句,每个例句配中文翻译和一句作用说明...
+
+  ## 四、易错点 / 中国学生常见误用
+
+  ...列 3-5 条常见错误,每条:错误句 → 正确句 → 为什么错...
+
+  ## 五、学习建议
+
+  ...一段建议,告诉学生先掌握什么、怎么练、和哪个知识点要对比学习...
+
+topics:
+  - id: en-simple-present
+    title: 一般现在时 (Simple Present)
+    learning_objective: 能正确使用一般现在时表达事实、习惯、客观规律
+    keywords: [be 动词, 实意动词, 第三人称单数, 时间状语]
+
+  - id: en-simple-past
+    title: 一般过去时 (Simple Past)
+    learning_objective: 能用动词过去式表达过去发生的动作或状态
+    keywords: [过去式, 规则变化, 不规则变化, 时间标志词]
+
+  - id: en-simple-future
+    title: 一般将来时 (Simple Future)
+    learning_objective: 掌握 will / be going to 的区别与用法
+    keywords: [will, be going to, 计划, 预测]
+
+  - id: en-present-continuous
+    title: 现在进行时 (Present Continuous)
+    learning_objective: 能用 be + V-ing 表达正在进行的动作或近期安排
+    keywords: [be + V-ing, now, at the moment, 暂时性, 计划安排]
+
+  - id: en-past-continuous
+    title: 过去进行时 (Past Continuous)
+    learning_objective: 能用 was/were + V-ing 表达过去某时正在进行的动作
+    keywords: [was/were + V-ing, 时间从句 when/while]
+
+  - id: en-present-perfect
+    title: 现在完成时 (Present Perfect)
+    learning_objective: 区分现在完成时与一般过去时,掌握其表达"对现在的影响"含义
+    keywords: [have/has + 过去分词, since, for, already, yet, ever, never]
+
+  - id: en-past-perfect
+    title: 过去完成时 (Past Perfect)
+    learning_objective: 能用 had + 过去分词表达"过去的过去"
+    keywords: [had + 过去分词, by the time, before/after]
+
+  - id: en-passive-voice
+    title: 被动语态 (Passive Voice)
+    learning_objective: 掌握各时态被动语态的基本结构与使用情境
+    keywords: [be + 过去分词, by, 主动转被动, 各时态变化]
+
+  - id: en-object-clause
+    title: 宾语从句 (Object Clause)
+    learning_objective: 掌握 that / wh- / whether/if 引导的宾语从句,注意语序与时态呼应
+    keywords: [宾语从句, that, wh-, whether/if, 陈述语序, 时态一致]
+
+  - id: en-attributive-clause
+    title: 定语从句 (Attributive Clause)
+    learning_objective: 掌握 who / which / that / whose / whom 引导的定语从句
+    keywords: [先行词, 关系代词, that 与 which 区别, 介词 + 关系代词]
+
+  - id: en-adverbial-clause
+    title: 状语从句 (Adverbial Clause)
+    learning_objective: 掌握时间 / 条件 / 原因 / 让步 / 结果状语从句的关键连词与时态
+    keywords: [when, while, as soon as, if, unless, because, although, so...that]
+
+  - id: en-direct-indirect-speech
+    title: 直接引语与间接引语 (Reported Speech)
+    learning_objective: 掌握引语转换中的人称、时态、时间地点等变化
+    keywords: [直接引语, 间接引语, 时态后移, 代词变化, 疑问句转换]
+
+  - id: en-comparison
+    title: 形容词与副词的比较级和最高级
+    learning_objective: 掌握比较级 / 最高级的构成与典型用法
+    keywords: [比较级, 最高级, as...as, more...than, the most]
+
+  - id: en-modal-verbs
+    title: 情态动词 (Modal Verbs)
+    learning_objective: 掌握 can / could / may / might / must / should / have to 的基本含义
+    keywords: [can, could, may, might, must, should, have to, 推测, 义务]
+
+  - id: en-infinitive-gerund
+    title: 不定式与动名词 (Infinitive & Gerund)
+    learning_objective: 区分 to do 与 doing 作宾语 / 作主语 / 作目的状语的用法
+    keywords: [to do, doing, 作宾语, 作目的状语, 动词 + to do / + doing]
+
+  - id: en-noun-clause
+    title: 名词性从句 (Noun Clauses)
+    learning_objective: 了解主语从句 / 宾语从句 / 表语从句 / 同位语从句的引导词与语序
+    keywords: [主语从句, 宾语从句, 表语从句, 同位语从句]
+
+  - id: en-reading-strategies
+    title: 阅读理解策略
+    learning_objective: 掌握跳读 / 略读 / 推断词义 / 找主旨等基础阅读策略
+    keywords: [skim, scan, 推断词义, 主旨, 细节, 推理, 标题归纳]
