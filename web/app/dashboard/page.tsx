@@ -126,16 +126,24 @@ export default function DashboardPage() {
             <section className="space-y-3">
               <SectionTitle
                 title="各科学习进度"
-                hint="Phase 0 用占位数据 · 真实数据将在 Phase 2 接入"
+                hint="由 AI 在每次对话后自动抽取知识点 + 掌握度"
               />
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {AGENT_ORDER.filter((t) => AGENTS[t].subjectId).map((type) => (
-                  <SubjectProgressCard
-                    key={type}
-                    agent={AGENTS[type]}
-                    onEnter={() => enterAgent(type)}
-                  />
-                ))}
+                {AGENT_ORDER.filter((t) => AGENTS[t].subjectId).map((type) => {
+                  const agent = AGENTS[type];
+                  const progress = dashboardQuery.data?.progress?.find(
+                    (p) => p.subject_id === agent.subjectId,
+                  );
+                  return (
+                    <SubjectProgressCard
+                      key={type}
+                      agent={agent}
+                      progress={progress}
+                      modelLabel={models?.default}
+                      onEnter={() => enterAgent(type)}
+                    />
+                  );
+                })}
               </div>
             </section>
 

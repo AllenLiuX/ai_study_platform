@@ -1,0 +1,40 @@
+# 初中数学知识点树 (Phase 2)
+# 顶层 chapter 对应一组 leaf,leaf id 与 Phase 1.5 curriculum 保持一致以便复用 AI 讲义
+subject_id: math
+stage: 初中
+chapters:
+  - id: math-ch-numbers
+    name: 数与代数
+    leaves:
+      - { id: math-rational-real-numbers, name: 有理数与实数 }
+      - { id: math-polynomials-factoring, name: 整式运算与因式分解 }
+      - { id: math-fractions, name: 分式与分式方程 }
+  - id: math-ch-equations
+    name: 方程与不等式
+    leaves:
+      - { id: math-linear-equation, name: 一元一次方程 }
+      - { id: math-quadratic-equation, name: 一元二次方程 }
+      - { id: math-linear-equations-two-vars, name: 二元一次方程组 }
+      - { id: math-inequality, name: 不等式与不等式组 }
+  - id: math-ch-functions
+    name: 函数
+    leaves:
+      - { id: math-linear-function, name: 一次函数 }
+      - { id: math-inverse-proportion, name: 反比例函数 }
+      - { id: math-quadratic-function, name: 二次函数 }
+  - id: math-ch-geometry
+    name: 几何
+    leaves:
+      - { id: math-coordinate-system, name: 平面直角坐标系 }
+      - { id: math-triangle, name: 三角形 (全等与相似) }
+      - { id: math-pythagorean, name: 勾股定理 }
+      - { id: math-quadrilateral, name: 四边形 }
+      - { id: math-circle, name: 圆 }
+  - id: math-ch-stats
+    name: 统计与概率
+    leaves:
+      - { id: math-statistics-probability, name: 统计与概率 }
+  - id: math-ch-trig
+    name: 三角
+    leaves:
+      - { id: math-trigonometry-acute, name: 锐角三角函数 }

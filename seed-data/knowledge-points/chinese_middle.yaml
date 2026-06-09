@@ -1,0 +1,42 @@
+# 初中语文知识点树 (Phase 2)
+subject_id: chinese
+stage: 初中
+chapters:
+  - id: cn-ch-classical
+    name: 文言文
+    leaves:
+      - { id: cn-classical-content-words, name: 文言文常见实词 }
+      - { id: cn-classical-function-words, name: 文言虚词 }
+      - { id: cn-classical-sentence-patterns, name: 文言文特殊句式 }
+  - id: cn-ch-rhetoric
+    name: 修辞与表达
+    leaves:
+      - { id: cn-rhetorical-devices, name: 修辞手法识别与分析 }
+      - { id: cn-expression-techniques, name: 表达方式与表现手法 }
+  - id: cn-ch-reading
+    name: 现代文阅读
+    leaves:
+      - { id: cn-narrative-reading, name: 记叙文阅读 }
+      - { id: cn-explanatory-reading, name: 说明文阅读 }
+      - { id: cn-argumentative-reading, name: 议论文阅读 }
+      - { id: cn-prose-reading, name: 散文阅读 }
+      - { id: cn-novel-reading, name: 小说阅读 }
+  - id: cn-ch-poetry
+    name: 诗词
+    leaves:
+      - { id: cn-poetry-appreciation, name: 古诗词鉴赏方法 }
+      - { id: cn-recommended-poems, name: 初中必背古诗文要点 }
+  - id: cn-ch-famous
+    name: 名著
+    leaves:
+      - { id: cn-famous-books, name: 名著阅读核心要点 }
+  - id: cn-ch-basics
+    name: 字词与病句
+    leaves:
+      - { id: cn-pronunciation-glyph, name: 字音、字形与常用易错字 }
+      - { id: cn-病句-修改, name: 病句辨析与修改 }
+  - id: cn-ch-writing
+    name: 写作
+    leaves:
+      - { id: cn-narrative-writing, name: 记叙文写作 }
+      - { id: cn-argumentative-writing, name: 议论文写作 }

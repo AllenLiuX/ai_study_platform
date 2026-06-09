@@ -6,13 +6,14 @@ import json
 import logging
 from typing import AsyncIterator
 
-from fastapi import HTTPException, status
+from fastapi import BackgroundTasks, HTTPException, status
 
 from ..agents.registry import AgentConfig, get_agent
 from ..agents.runtime import stream_reply
 from ..core.llm import resolve_model
 from ..db import repos
 from ..schemas.chat import CreateSessionRequest
+from .progress_extractor import extract_and_update
 from .retrieval import RetrievedChunk, format_context, retrieve_chunks
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,7 @@ async def stream_assistant_reply(
     user_content: str,
     material_ids: list[str] | None,
     student_profile: dict | None,
+    background_tasks: BackgroundTasks | None = None,
 ) -> AsyncIterator[str]:
     """流式生成 assistant 回复。
 
@@ -159,6 +161,7 @@ async def stream_assistant_reply(
             yield _sse("delta", {"text": delta})
 
         full_text = "".join(assistant_text_parts).strip()
+        assistant_message_id: str | None = None
         if full_text:
             assistant_meta: dict = {
                 "model_tier": agent.tier.value,
@@ -167,11 +170,34 @@ async def stream_assistant_reply(
             }
             if citations:
                 assistant_meta["citations"] = _citation_payload(citations)
-            repos.insert_message(
+            assistant_row = repos.insert_message(
                 session_id=session_id,
                 role="assistant",
                 content=full_text,
                 metadata=assistant_meta,
+            )
+            assistant_message_id = assistant_row.get("id") if assistant_row else None
+
+        # Phase 2: 学科老师对话结束后,异步抽取学生掌握度 (head_teacher 跳过)
+        subject_id = session.get("subject_id") or agent.subject_id
+        if (
+            background_tasks is not None
+            and full_text
+            and subject_id
+            and agent.agent_type != "head_teacher"
+        ):
+            subject_row = next(
+                (s for s in repos.list_subjects() if s["id"] == subject_id), None
+            )
+            background_tasks.add_task(
+                extract_and_update,
+                student_id=user_id,
+                subject_id=subject_id,
+                subject_name=(subject_row or {}).get("name", subject_id),
+                session_id=session_id,
+                assistant_message_id=assistant_message_id,
+                user_msg=user_content,
+                assistant_msg=full_text,
             )
 
         if not session.get("title") or session.get("title", "").endswith("的对话"):

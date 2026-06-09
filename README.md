@@ -62,10 +62,24 @@
 - [x] `MaterialPicker` 分 section 显示两类资料;选中后后端 RAG 不需要区分
 - [x] `scripts/phase15_smoke.py`:12 项断言,验证新用户能看到 platform 资料 + 基于 platform 做 RAG + 不能删 platform
 
+### Phase 2 — 学习进度沉淀 ✅
+
+每次和学科老师聊天后,后台异步抽取这一轮涉及的知识点 + 掌握度,沉淀到 `student_progress`,Dashboard 各科卡片实时反映真实状态。
+
+- [x] DB schema ([0003_phase2_progress.sql](supabase/migrations/0003_phase2_progress.sql)):`knowledge_points` 树 + `student_progress` 表 + 三个 RPC (`summarize_student_progress` / `list_weak_points` / `recent_chapter`) + RLS
+- [x] 知识点树 ([seed-data/knowledge-points/](seed-data/knowledge-points/)):三科共 **21 chapters · 51 leaves**;leaf id 与 Phase 1.5 课标对齐 (一个 leaf ↔ 一份 AI 讲义)
+- [x] `scripts/seed_knowledge_points.py`:upsert 知识点树到 Supabase (幂等)
+- [x] `scripts/apply_migration.py`:psycopg 直连远端,一键应用任意 .sql migration
+- [x] **抽取服务** ([progress_extractor.py](api/app/services/progress_extractor.py)):用 `gpt-4o-mini` + JSON mode,把一轮对话映射到 ≤3 个候选知识点 + 状态 (asked / struggled / got_it / reviewed) + mastery_delta
+- [x] **触发**:chat 路由用 FastAPI `BackgroundTasks`,SSE 流结束后异步执行抽取,不阻塞用户;`head_teacher` 跳过 (与学科无关)
+- [x] **更新逻辑**:`student_progress` upsert,mastery 增量更新 (clamp 0-100) + encounter_count + recent_error_count + last_evaluation jsonb
+- [x] **API**:`GET /api/student/progress` 返回各学科 `{avg_mastery, covered_count, weak_count, current_chapter, weak_points[]}`;也拼到 `/api/student/dashboard`
+- [x] **前端**:`SubjectProgressCard` 接真实 mastery / 当前章节 / 薄弱点;每张卡底部用 `<Sparkles>` 标注「由 gpt-4o-mini 分析对话生成」
+- [x] `scripts/phase2_smoke.py`:12 项断言,验证完整 chain (对话 → BackgroundTask 抽取 → progress 更新 → dashboard 真实数据 → head_teacher 不抽取)
+
 ### 后续 Phase Roadmap
 
-- **Phase 2 — 学习进度沉淀**:`knowledge_points` 种子树 + 对话后用 LLM 抽取知识点和薄弱点 → 写入 `student_progress`;Dashboard 渲染真实掌握度
-- **Phase 3 — 任务系统 + 学习报告**:规则 + LLM 生成今日任务、周学习报告
+- **Phase 3 — 任务系统 + 学习报告**:基于 `student_progress` 的薄弱点和 encounter 历史,LLM 生成"今日推荐任务"(替换 Dashboard 占位);周报告聚合最近 7 天的学习节奏 / 掌握度变化
 - **Phase 4 — 多模态**:图片(题目拍照)/ 手写公式 / 语音输入
 - **Phase 5 — 管理端 + 家长端**:平台公共资料管理 UI、学生列表/对话日志、家长视角周报、内容安全审核
 
@@ -78,7 +92,7 @@
 | 前端 | Next.js 14 (App Router) + TypeScript + Tailwind + 自写 shadcn 组件 + TanStack Query + `@supabase/ssr` |
 | 后端 | FastAPI + Pydantic + httpx + OpenAI SDK + `supabase-py` |
 | 数据库 | Supabase Postgres (含 Auth / Storage / pgvector) |
-| AI | OpenAI:`gpt-4o-mini` 默认 + `gpt-4o` 关键场景 + `text-embedding-3-small` (Phase 1) |
+| AI | OpenAI:`gpt-4o-mini` 默认 + `gpt-4o` 关键场景 + `text-embedding-3-small` (Phase 1) + `gpt-4o-mini` JSON mode 抽取学习进度 (Phase 2) |
 | 部署 (后续) | Vercel (前端) + Railway/Render/自建 (后端) |
 
 ---
@@ -92,10 +106,12 @@ flowchart TB
   NextApp -->|"REST + SSE"| FastAPI["FastAPI Backend<br/>api/"]
   FastAPI -->|"Verify JWT"| SupabaseAuth
   FastAPI -->|"service role"| SupabaseDB["Supabase Postgres<br/>+ pgvector"]
-  FastAPI -->|"Chat / Embedding"| OpenAI["OpenAI API<br/>gpt-4o-mini / 4o"]
+  FastAPI -->|"Chat / Embedding / JSON 抽取"| OpenAI["OpenAI API<br/>gpt-4o-mini / 4o"]
   SupabaseDB -->|"top-k cosine"| RAG["Material Chunks<br/>pgvector HNSW"]
+  SupabaseDB -->|"knowledge_points<br/>+ student_progress"| Progress["学习进度<br/>(Phase 2)"]
   Browser -->|"upload PDF/MD"| Storage["Supabase Storage<br/>materials/"]
   FastAPI -.->|"BackgroundTasks<br/>parse → chunk → embed"| Storage
+  FastAPI -.->|"BackgroundTasks<br/>抽取 KP + 更新 mastery"| Progress
 ```
 
 ---
@@ -118,17 +134,21 @@ student_coach/
       0001_phase0_init.sql
       0002_phase1_materials.sql
     seed.sql               # 种子学科数据
-  seed-data/               # 平台公共资料 (Phase 1.5)
+    seed-data/               # 平台公共资料 + 知识点 (Phase 1.5 + Phase 2)
     curriculum/            # 课标骨架 yaml (人工维护)
     platform/<subject>/    # AI 生成的 markdown 讲义 (gen 出来的)
+    knowledge-points/      # 知识点树 yaml (Phase 2)
   scripts/
     dev.sh                          # 一键启动前后端
     smoke_test.py                   # Phase 0 后端冒烟
     phase1_smoke.py                 # Phase 1 (RAG) 后端冒烟
     phase15_smoke.py                # Phase 1.5 (公共资料) 后端冒烟
+    phase2_smoke.py                 # Phase 2 (学习进度) 后端冒烟
     frontend_smoke.py               # 前端路由 + 中间件冒烟
+    apply_migration.py              # psycopg 直连应用任意 .sql migration
     generate_knowledge_notes.py     # Phase 1.5: 基于课标生成 AI 讲义
     seed_platform_materials.py      # Phase 1.5: 把讲义入库为 platform 资料
+    seed_knowledge_points.py        # Phase 2: 把知识点树入库
   web/                     # Next.js 前端
     app/
       (auth)/login         (auth)/signup
@@ -162,11 +182,13 @@ student_coach/
    - `Project URL` → `SUPABASE_URL` 和 `NEXT_PUBLIC_SUPABASE_URL`
    - `anon public` key → `SUPABASE_ANON_KEY` 和 `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (**只给后端用,别泄到前端**)
-3. 打开 Supabase Dashboard → `SQL Editor`,依次粘贴并执行:
+3. 打开 Supabase Dashboard → `SQL Editor`,依次粘贴并执行 (也可以用 `python scripts/apply_migration.py <path>` 一键打):
    - [supabase/migrations/0001_phase0_init.sql](supabase/migrations/0001_phase0_init.sql) — 基础表 + RLS
    - [supabase/migrations/0002_phase1_materials.sql](supabase/migrations/0002_phase1_materials.sql) — 资料库 + pgvector + Storage 桶
+   - [supabase/migrations/0003_phase2_progress.sql](supabase/migrations/0003_phase2_progress.sql) — 知识点树 + student_progress + 聚合 RPC
    - [supabase/seed.sql](supabase/seed.sql) — 数学/英语/语文三个学科种子
-4. (可选) `Authentication → Providers → Email` 中,本地开发可以关闭 "Confirm email" 让注册更顺;生产环境务必打开
+4. 在项目根目录跑 `cd api && source .venv/bin/activate && python ../scripts/seed_knowledge_points.py` 入库知识点树
+5. (可选) `Authentication → Providers → Email` 中,本地开发可以关闭 "Confirm email" 让注册更顺;生产环境务必打开
 
 ### 1. 启动
 

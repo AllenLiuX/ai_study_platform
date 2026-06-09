@@ -1,31 +1,35 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import type { AgentMeta } from "@/lib/agents";
+import type { SubjectProgress, WeakPoint } from "@/lib/types";
 
 interface SubjectProgressCardProps {
   agent: AgentMeta;
-  /** 当前章节,Phase 0 用 placeholder 文案 */
-  currentChapter?: string;
-  /** 掌握度 0-100 */
-  mastery?: number;
-  /** 薄弱知识点 */
-  weakPoints?: string[];
+  progress?: SubjectProgress;
+  /** 触发抽取的模型,展示在卡片底部 */
+  modelLabel?: string;
   onEnter?: () => void;
 }
 
 export function SubjectProgressCard({
   agent,
-  currentChapter = "暂未开始,等你和老师聊起来",
-  mastery,
-  weakPoints = [],
+  progress,
+  modelLabel,
   onEnter,
 }: SubjectProgressCardProps) {
-  const hasData = typeof mastery === "number";
+  const covered = progress?.covered_count ?? 0;
+  const hasData = covered > 0;
+  const mastery = hasData ? Math.round(progress!.avg_mastery) : 50;
+  const currentChapter =
+    progress?.current_chapter ?? "暂未开始,等你和老师聊起来";
+  const weakPoints: WeakPoint[] = (progress?.weak_points ?? []).filter(
+    (p) => p.encounter_count > 0,
+  );
 
   return (
     <Card className="group overflow-hidden transition hover:-translate-y-0.5 hover:shadow-card">
@@ -50,7 +54,7 @@ export function SubjectProgressCard({
       </div>
       <CardContent className="space-y-3 pt-5">
         <div className="text-xs uppercase tracking-wide text-muted-foreground">
-          当前
+          最近章节
         </div>
         <div className="text-sm font-medium text-foreground">
           {currentChapter}
@@ -63,19 +67,32 @@ export function SubjectProgressCard({
               {hasData ? `${mastery}%` : "待评估"}
             </span>
           </div>
-          <Progress value={hasData ? mastery! : 0} />
+          <Progress value={mastery} />
+          {hasData && (
+            <div className="text-[10px] text-muted-foreground">
+              已涉及 {covered} 个知识点 · {progress?.weak_count ?? 0} 个待巩固
+            </div>
+          )}
         </div>
 
         <div className="text-xs text-muted-foreground">
           {weakPoints.length > 0 ? (
             <>
               <span className="text-foreground">薄弱点:</span>{" "}
-              {weakPoints.join("、")}
+              {weakPoints.map((p) => p.name).join("、")}
             </>
           ) : (
-            <span>薄弱点会在多次对话后自动总结(Phase 2)</span>
+            <span>多和老师聊几次,AI 会自动总结你的薄弱点</span>
           )}
         </div>
+
+        {modelLabel && hasData && (
+          <div className="flex items-center gap-1 pt-1 text-[10px] text-primary/70">
+            <Sparkles className="h-2.5 w-2.5" />
+            <span className="font-mono">{modelLabel}</span>
+            <span>分析对话生成</span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

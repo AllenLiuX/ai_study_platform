@@ -43,7 +43,26 @@ class Subject(BaseModel):
     sort_order: int = 0
 
 
+class WeakPoint(BaseModel):
+    knowledge_point_id: str
+    name: str
+    parent_name: str | None = None
+    mastery: int
+    encounter_count: int = 0
+
+
+class SubjectProgress(BaseModel):
+    subject_id: str
+    subject_name: str
+    avg_mastery: float = 50.0
+    covered_count: int = 0
+    weak_count: int = 0
+    current_chapter: str | None = None
+    weak_points: list[WeakPoint] = Field(default_factory=list)
+
+
 class DashboardResponse(BaseModel):
     profile: StudentProfile
     subjects: list[Subject]
     recent_sessions: list[dict] = Field(default_factory=list)
+    progress: list[SubjectProgress] = Field(default_factory=list)

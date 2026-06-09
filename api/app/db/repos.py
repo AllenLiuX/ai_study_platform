@@ -244,3 +244,35 @@ def count_material_chunks(material_id: str) -> int:
         .execute()
     )
     return resp.count or 0
+
+
+# -----------------------------------------------------------------------------
+# Knowledge Points & Progress (Phase 2)
+# -----------------------------------------------------------------------------
+def summarize_progress(user_id: str) -> list[dict]:
+    """每个学科:avg_mastery / covered_count / weak_count。"""
+    client = get_admin_client()
+    resp = client.rpc(
+        "summarize_student_progress", {"p_student_id": user_id}
+    ).execute()
+    return resp.data or []
+
+
+def list_weak_points(user_id: str, subject_id: str, limit: int = 3) -> list[dict]:
+    """某学科薄弱点 top-N。"""
+    client = get_admin_client()
+    resp = client.rpc(
+        "list_weak_points",
+        {"p_student_id": user_id, "p_subject_id": subject_id, "p_limit": limit},
+    ).execute()
+    return resp.data or []
+
+
+def get_recent_chapter(user_id: str, subject_id: str) -> dict | None:
+    """学生在某学科最近接触最多的章节。"""
+    client = get_admin_client()
+    resp = client.rpc(
+        "recent_chapter", {"p_student_id": user_id, "p_subject_id": subject_id}
+    ).execute()
+    rows = resp.data or []
+    return rows[0] if rows else None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 
 from ..agents.registry import all_agents
@@ -61,6 +61,7 @@ async def list_session_messages(
 async def send_message(
     session_id: str,
     payload: SendMessageRequest,
+    background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(get_current_user),
 ) -> StreamingResponse:
     """以 SSE 流式返回 assistant 回复。
@@ -81,6 +82,7 @@ async def send_message(
             user_content=payload.content,
             material_ids=payload.material_ids,
             student_profile=profile,
+            background_tasks=background_tasks,
         ),
         media_type="text/event-stream",
         headers={

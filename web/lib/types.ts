@@ -62,10 +62,29 @@ export interface ChatMessage {
   created_at?: string | null;
 }
 
+export interface WeakPoint {
+  knowledge_point_id: string;
+  name: string;
+  parent_name: string | null;
+  mastery: number;
+  encounter_count: number;
+}
+
+export interface SubjectProgress {
+  subject_id: string;
+  subject_name: string;
+  avg_mastery: number;
+  covered_count: number;
+  weak_count: number;
+  current_chapter: string | null;
+  weak_points: WeakPoint[];
+}
+
 export interface DashboardResponse {
   profile: StudentProfile;
   subjects: Subject[];
   recent_sessions: ChatSession[];
+  progress: SubjectProgress[];
 }
 
 // Phase 1: 学习资料 (上传到 Supabase Storage,后端切片+向量化后供 RAG 检索)

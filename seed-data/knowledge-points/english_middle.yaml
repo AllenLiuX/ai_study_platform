@@ -1,0 +1,45 @@
+# 初中英语知识点树 (Phase 2)
+subject_id: english
+stage: 初中
+chapters:
+  - id: en-ch-tenses
+    name: 时态
+    leaves:
+      - { id: en-simple-present, name: 一般现在时 }
+      - { id: en-simple-past, name: 一般过去时 }
+      - { id: en-simple-future, name: 一般将来时 }
+      - { id: en-present-continuous, name: 现在进行时 }
+      - { id: en-past-continuous, name: 过去进行时 }
+      - { id: en-present-perfect, name: 现在完成时 }
+      - { id: en-past-perfect, name: 过去完成时 }
+  - id: en-ch-voice
+    name: 语态
+    leaves:
+      - { id: en-passive-voice, name: 被动语态 }
+  - id: en-ch-clauses
+    name: 从句
+    leaves:
+      - { id: en-object-clause, name: 宾语从句 }
+      - { id: en-attributive-clause, name: 定语从句 }
+      - { id: en-adverbial-clause, name: 状语从句 }
+      - { id: en-noun-clause, name: 名词性从句 }
+  - id: en-ch-speech
+    name: 引语
+    leaves:
+      - { id: en-direct-indirect-speech, name: 直接引语与间接引语 }
+  - id: en-ch-comparison
+    name: 比较与修饰
+    leaves:
+      - { id: en-comparison, name: 形容词与副词比较级 / 最高级 }
+  - id: en-ch-modals
+    name: 情态动词
+    leaves:
+      - { id: en-modal-verbs, name: 情态动词 }
+  - id: en-ch-verbal
+    name: 非谓语动词
+    leaves:
+      - { id: en-infinitive-gerund, name: 不定式与动名词 }
+  - id: en-ch-reading
+    name: 阅读策略
+    leaves:
+      - { id: en-reading-strategies, name: 阅读理解策略 }
