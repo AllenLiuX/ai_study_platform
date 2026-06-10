@@ -189,6 +189,8 @@ export const chatApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  deleteSession: (sessionId: string) =>
+    request<void>(`/api/chat/sessions/${sessionId}`, { method: "DELETE" }),
   listMessages: (sessionId: string) =>
     request<ChatMessage[]>(`/api/chat/sessions/${sessionId}/messages`),
   /** Phase 4: 上传一张题目图片到 chat-attachments bucket,返回 storage_path */

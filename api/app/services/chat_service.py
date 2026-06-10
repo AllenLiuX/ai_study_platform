@@ -156,6 +156,11 @@ def list_sessions(user_id: str) -> list[dict]:
     return repos.list_sessions(user_id)
 
 
+def delete_session(*, session_id: str, user_id: str) -> bool:
+    """硬删 session (附带 messages,经 FK ON DELETE CASCADE)。"""
+    return repos.delete_session(session_id, user_id)
+
+
 def _citation_payload(chunks: list[RetrievedChunk]) -> list[dict]:
     """前端可消费的引用条目。
 

@@ -68,6 +68,17 @@ async def list_sessions(
     return chat_service.list_sessions(user.id)
 
 
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(
+    session_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> None:
+    """硬删 session + 关联 messages (FK ON DELETE CASCADE)。"""
+    ok = chat_service.delete_session(session_id=session_id, user_id=user.id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="对话不存在或无权删除")
+
+
 @router.get(
     "/sessions/{session_id}/messages", response_model=list[ChatMessage]
 )

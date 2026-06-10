@@ -91,6 +91,23 @@ def list_sessions(student_id: str, limit: int = 50) -> list[dict]:
     return resp.data or []
 
 
+def delete_session(session_id: str, student_id: str) -> bool:
+    """删除 session (附带 messages,通过 FK ON DELETE CASCADE)。
+
+    返回 True 表示删了 (传入 session 属当前 user);False 表示该 session
+    不存在 / 不归属当前 user — 此时不报错,但调用方应当返回 404。
+    """
+    client = get_admin_client()
+    resp = (
+        client.table("chat_sessions")
+        .delete()
+        .eq("id", session_id)
+        .eq("student_id", student_id)
+        .execute()
+    )
+    return bool(resp.data)
+
+
 def touch_session(session_id: str, *, title: str | None = None) -> None:
     """更新 session 的 updated_at,可选更新 title。"""
     client = get_admin_client()

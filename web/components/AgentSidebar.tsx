@@ -1,10 +1,10 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
-import { Loader2, MessageCircle, Plus } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loader2, MessageCircle, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   AGENTS,
@@ -164,44 +164,17 @@ export function AgentSidebar({
         </Link>
       )}
 
-      <div className="flex-1 space-y-2 border-t border-border/60 pt-4">
-        <div className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          历史对话
-        </div>
-        {sessions.length === 0 ? (
-          <p className="px-2 text-xs text-muted-foreground">暂无历史</p>
-        ) : (
-          <ul className="space-y-1">
-            {sessions.map((s) => {
-              const agent = getAgentMeta(s.agent_type);
-              const isActive = s.id === currentSessionId;
-              return (
-                <li key={s.id}>
-                  <Link
-                    href={`/chat/${s.id}`}
-                    className={cn(
-                      "flex items-start gap-2.5 rounded-xl px-3 py-2 text-sm transition",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "hover:bg-secondary",
-                    )}
-                  >
-                    <span className="mt-0.5 text-base">{agent.emoji}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">
-                        {s.title || agent.displayName}
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {agent.displayName}
-                      </span>
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+      <SessionList
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        currentAgent={currentAgent}
+        onAfterDelete={(deletedId) => {
+          // 删的不是当前 session 不用跳;否则去最近的另一个 session 或 dashboard
+          if (deletedId !== currentSessionId) return;
+          const fallback = sessions.find((s) => s.id !== deletedId);
+          router.push(fallback ? `/chat/${fallback.id}` : "/dashboard");
+        }}
+      />
 
       <Link
         href="/dashboard"
@@ -211,6 +184,138 @@ export function AgentSidebar({
         回到驾驶舱
       </Link>
     </aside>
+  );
+}
+
+function SessionList({
+  sessions,
+  currentSessionId,
+  currentAgent,
+  onAfterDelete,
+}: {
+  sessions: ChatSession[];
+  currentSessionId: string;
+  currentAgent: AgentType;
+  onAfterDelete: (deletedId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [showAll, setShowAll] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // 默认只看当前老师的对话 — 减少 sidebar 噪音
+  const visible = useMemo(() => {
+    if (showAll) return sessions;
+    return sessions.filter((s) => s.agent_type === currentAgent);
+  }, [sessions, showAll, currentAgent]);
+
+  const hiddenCount = sessions.length - visible.length;
+
+  const deleteMutation = useMutation({
+    mutationFn: (sessionId: string) => chatApi.deleteSession(sessionId),
+    onMutate: (sessionId) => setDeletingId(sessionId),
+    onSuccess: (_data, sessionId) => {
+      // 立刻从 cache 移除
+      queryClient.setQueryData<ChatSession[]>(["chat-sessions"], (prev) =>
+        (prev ?? []).filter((s) => s.id !== sessionId),
+      );
+      queryClient.removeQueries({ queryKey: ["chat-messages", sessionId] });
+      onAfterDelete(sessionId);
+    },
+    onSettled: () => setDeletingId(null),
+  });
+
+  function handleDelete(e: React.MouseEvent, session: ChatSession) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (deletingId) return;
+    const ok = window.confirm(
+      `确定删除「${session.title || "未命名对话"}」?消息记录无法找回。`,
+    );
+    if (!ok) return;
+    deleteMutation.mutate(session.id);
+  }
+
+  return (
+    <div className="flex-1 space-y-2 border-t border-border/60 pt-4">
+      <div className="flex items-center justify-between px-2">
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          历史对话
+        </div>
+        {sessions.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="text-[11px] text-muted-foreground transition hover:text-primary"
+            title={showAll ? "切换为只显示当前老师" : "显示所有老师"}
+          >
+            {showAll ? "只看当前" : `全部 (${sessions.length})`}
+          </button>
+        )}
+      </div>
+      {visible.length === 0 ? (
+        <p className="px-2 text-xs text-muted-foreground">
+          {sessions.length === 0
+            ? "暂无历史"
+            : hiddenCount > 0
+              ? `当前老师暂无对话(其它老师 ${hiddenCount} 条)`
+              : "暂无历史"}
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {visible.map((s) => {
+            const agent = getAgentMeta(s.agent_type);
+            const isActive = s.id === currentSessionId;
+            const isDeleting = deletingId === s.id;
+            return (
+              <li key={s.id} className="group relative">
+                <Link
+                  href={`/chat/${s.id}`}
+                  className={cn(
+                    "flex items-start gap-2.5 rounded-xl px-3 py-2 pr-9 text-sm transition",
+                    isActive
+                      ? "bg-primary/10 text-primary"
+                      : "hover:bg-secondary",
+                  )}
+                >
+                  <span className="mt-0.5 text-base">{agent.emoji}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">
+                      {s.title || agent.displayName}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {agent.displayName}
+                    </span>
+                  </span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={(e) => handleDelete(e, s)}
+                  disabled={isDeleting}
+                  title="删除该对话"
+                  className={cn(
+                    "absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground transition",
+                    "opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive",
+                    "focus-visible:opacity-100",
+                    isDeleting && "opacity-100",
+                  )}
+                >
+                  {isDeleting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {showAll && hiddenCount > 0 && (
+        <p className="px-2 text-[11px] text-muted-foreground">
+          已显示全部 {sessions.length} 条对话
+        </p>
+      )}
+    </div>
   );
 }
 
