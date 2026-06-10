@@ -55,6 +55,30 @@ export interface FollowUp {
   reason?: string | null;
 }
 
+// Phase 3.5: 模型档位 (与后端 ModelTier 对齐)
+export type ModelTierId =
+  | "low"
+  | "medium"
+  | "high"
+  | "extra_high"
+  | "max";
+
+export interface ModelTierInfo {
+  tier: ModelTierId;
+  /** 后端实际解析出的 OpenAI 模型名,例:gpt-4o-mini */
+  model: string;
+  /** 内部 label, 例 "extra-high" */
+  label: string;
+  /** 展示 label, 例 "Extra-high" */
+  display: string;
+  /** 能力等级 1-6 (展示用 dots) */
+  capability: number;
+  /** 相对成本 1-10 (展示用 dots) */
+  cost: number;
+  desc: string;
+  is_default: boolean;
+}
+
 export interface ChatMessage {
   id?: string;
   session_id: string;
@@ -65,7 +89,7 @@ export interface ChatMessage {
     material_ids?: string[];
     agent_type?: AgentType;
     model?: string;
-    model_tier?: string;
+    model_tier?: ModelTierId | string;
     follow_ups?: FollowUp[];
     [key: string]: unknown;
   };

@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    # ------- 历史字段 (向后兼容,Phase 3.5 之后用 5 档替代) -------
     openai_chat_model_default: str = Field(
         default="gpt-4o-mini", alias="OPENAI_CHAT_MODEL_DEFAULT"
     )
@@ -32,6 +33,17 @@ class Settings(BaseSettings):
     openai_embedding_model: str = Field(
         default="text-embedding-3-small", alias="OPENAI_EMBEDDING_MODEL"
     )
+
+    # ------- Phase 3.5: 5 档模型(用户可在对话中现选)-------
+    # 默认 medium = default,high = premium,保证旧 .env 不改也能跑;
+    # 想用 o3-mini / o1 等推理模型,设对应 env 即可。
+    openai_chat_model_low: str = Field(default="", alias="OPENAI_CHAT_MODEL_LOW")
+    openai_chat_model_medium: str = Field(default="", alias="OPENAI_CHAT_MODEL_MEDIUM")
+    openai_chat_model_high: str = Field(default="", alias="OPENAI_CHAT_MODEL_HIGH")
+    openai_chat_model_extra_high: str = Field(
+        default="", alias="OPENAI_CHAT_MODEL_EXTRA_HIGH"
+    )
+    openai_chat_model_max: str = Field(default="", alias="OPENAI_CHAT_MODEL_MAX")
 
     supabase_url: str = Field(default="", alias="SUPABASE_URL")
     supabase_anon_key: str = Field(default="", alias="SUPABASE_ANON_KEY")

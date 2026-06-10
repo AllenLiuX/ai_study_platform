@@ -282,7 +282,8 @@ def _validate_task(item: dict, valid_kp_ids: set[str]) -> dict | None:
 
 async def _call_llm(*, system_prompt: str, user_prompt: str) -> dict:
     client = get_client()
-    model = resolve_model(ModelTier.DEFAULT)
+    # 今日任务规划每天每人最多 1 次 LLM 调用,用 MEDIUM 保证质量
+    model = resolve_model(ModelTier.MEDIUM)
     resp = await client.chat.completions.create(
         model=model,
         response_format={"type": "json_object"},

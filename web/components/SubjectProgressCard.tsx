@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Loader2, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +14,8 @@ interface SubjectProgressCardProps {
   /** 触发抽取的模型,展示在卡片底部 */
   modelLabel?: string;
   onEnter?: () => void;
+  /** 正在创建会话/跳转中,按钮显示 spinner 并禁用 */
+  busy?: boolean;
 }
 
 export function SubjectProgressCard({
@@ -21,6 +23,7 @@ export function SubjectProgressCard({
   progress,
   modelLabel,
   onEnter,
+  busy,
 }: SubjectProgressCardProps) {
   const covered = progress?.covered_count ?? 0;
   const hasData = covered > 0;
@@ -47,9 +50,18 @@ export function SubjectProgressCard({
             </div>
           </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={onEnter}>
-          找老师
-          <ArrowRight className="ml-1 h-4 w-4" />
+        <Button variant="ghost" size="sm" onClick={onEnter} disabled={busy}>
+          {busy ? (
+            <>
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              打开中
+            </>
+          ) : (
+            <>
+              找老师
+              <ArrowRight className="ml-1 h-4 w-4" />
+            </>
+          )}
         </Button>
       </div>
       <CardContent className="space-y-3 pt-5">

@@ -9,7 +9,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { ChatInput } from "@/components/ChatInput";
 import { ChatWindow } from "@/components/ChatWindow";
 import { MaterialPicker } from "@/components/MaterialPicker";
-import { ModelBadge } from "@/components/ModelBadge";
+import { ModelSelector } from "@/components/ModelSelector";
 import { StudentProfilePanel } from "@/components/StudentProfilePanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AGENTS } from "@/lib/agents";
@@ -25,6 +25,7 @@ import type {
   ChatMessage,
   Citation,
   FollowUp,
+  ModelTierId,
 } from "@/lib/types";
 
 export default function ChatSessionPage() {
@@ -60,7 +61,9 @@ export default function ChatSessionPage() {
     queryFn: metaApi.config,
     staleTime: 5 * 60_000,
   });
-  const chatModel = configQuery.data?.models.default;
+  const tiers = configQuery.data?.model_tiers;
+  const defaultTier: ModelTierId =
+    configQuery.data?.default_tier ?? "medium";
 
   const session = useMemo(
     () => sessionsQuery.data?.find((s) => s.id === sessionId),
@@ -78,6 +81,26 @@ export default function ChatSessionPage() {
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Phase 3.5: 模型档位 — 按 agent type 记忆到 localStorage,跨 session 也保留
+  const [selectedTier, setSelectedTier] = useState<ModelTierId | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(`model_tier:${agentType}`);
+    if (stored) setSelectedTier(stored as ModelTierId);
+    else setSelectedTier(null);
+  }, [agentType]);
+  function pickTier(t: ModelTierId) {
+    setSelectedTier(t);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(`model_tier:${agentType}`, t);
+    }
+  }
+  // 用于传给 chat header 顶部显示和 send 时的实际 tier
+  const effectiveTier: ModelTierId = selectedTier ?? defaultTier;
+  const effectiveModel =
+    tiers?.find((t) => t.tier === effectiveTier)?.model ??
+    configQuery.data?.models.default;
 
   const messages = useMemo(() => {
     const base = messagesQuery.data ?? [];
@@ -149,7 +172,10 @@ export default function ChatSessionPage() {
               abortRef.current = null;
             },
           },
-          { materialIds: effectiveMaterialIds },
+          {
+            materialIds: effectiveMaterialIds,
+            modelTier: selectedTier ?? undefined,
+          },
           ctrl.signal,
         );
       } catch (err) {
@@ -171,7 +197,7 @@ export default function ChatSessionPage() {
         abortRef.current = null;
       }
     },
-    [sessionId, isStreaming, queryClient, selectedMaterialIds],
+    [sessionId, isStreaming, queryClient, selectedMaterialIds, selectedTier],
   );
 
   function stop() {
@@ -239,7 +265,12 @@ export default function ChatSessionPage() {
                 · {agent.role}
               </span>
             </div>
-            {chatModel && <ModelBadge model={chatModel} label="对话" />}
+            <ModelSelector
+              tiers={tiers}
+              value={selectedTier}
+              onChange={pickTier}
+              disabled={isStreaming}
+            />
           </div>
           {loading ? (
             <div className="flex-1 space-y-4 p-6">
@@ -261,7 +292,7 @@ export default function ChatSessionPage() {
                 streamingCitations={streamingCitations}
                 streamingFollowUps={streamingFollowUps}
                 isStreaming={isStreaming}
-                modelLabel={chatModel}
+                modelLabel={effectiveModel}
                 onFollowUpClick={(q) => send(q)}
               />
             </>
@@ -286,7 +317,7 @@ export default function ChatSessionPage() {
         <StudentProfilePanel
           profile={profileQuery.data ?? null}
           agent={agent}
-          modelLabel={chatModel}
+          modelLabel={effectiveModel}
         />
       </div>
     </div>

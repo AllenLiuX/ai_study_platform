@@ -10,7 +10,7 @@ from fastapi import BackgroundTasks, HTTPException, status
 
 from ..agents.registry import AgentConfig, get_agent
 from ..agents.runtime import stream_reply
-from ..core.llm import resolve_model
+from ..core.llm import ModelTier, resolve_model
 from ..db import repos
 from ..db.supabase_client import get_admin_client
 from ..schemas.chat import CreateSessionRequest
@@ -90,6 +90,7 @@ async def stream_assistant_reply(
     material_ids: list[str] | None,
     student_profile: dict | None,
     background_tasks: BackgroundTasks | None = None,
+    model_tier: str | None = None,
 ) -> AsyncIterator[str]:
     """流式生成 assistant 回复。
 
@@ -120,11 +121,23 @@ async def stream_assistant_reply(
 
     assistant_text_parts: list[str] = []
     citations: list[RetrievedChunk] = []
+    # Phase 3.5: 学生临时选择的 tier 优先,否则用 agent 默认
     try:
-        model_name = resolve_model(agent.tier)
+        effective_tier: ModelTier = (
+            ModelTier(model_tier) if model_tier else agent.tier
+        )
+    except ValueError:
+        logger.warning("非法 model_tier=%s,回落到 agent 默认", model_tier)
+        effective_tier = agent.tier
+    try:
+        model_name = resolve_model(effective_tier)
         yield _sse(
             "ready",
-            {"agent_type": agent.agent_type, "model": model_name},
+            {
+                "agent_type": agent.agent_type,
+                "model": model_name,
+                "model_tier": effective_tier.value,
+            },
         )
 
         rag_context: str | None = None
@@ -158,6 +171,7 @@ async def stream_assistant_reply(
             history=history,
             student_profile=student_profile,
             rag_context=rag_context,
+            tier=effective_tier,
         ):
             assistant_text_parts.append(delta)
             yield _sse("delta", {"text": delta})
@@ -166,8 +180,8 @@ async def stream_assistant_reply(
         assistant_message_id: str | None = None
         if full_text:
             assistant_meta: dict = {
-                "model_tier": agent.tier.value,
-                "model": resolve_model(agent.tier),
+                "model_tier": effective_tier.value,
+                "model": model_name,
                 "agent_type": agent.agent_type,
             }
             if citations:
@@ -253,6 +267,7 @@ async def stream_assistant_reply(
                 "length": len(full_text),
                 "citation_count": len(citations),
                 "model": model_name,
+                "model_tier": effective_tier.value,
             },
         )
     except Exception as exc:

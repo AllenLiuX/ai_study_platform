@@ -87,7 +87,7 @@ async def _call_llm(*, subject_name: str, user_msg: str, assistant_msg: str, kps
         assistant_msg=assistant_msg.strip()[:1500],
         kp_list=_format_kp_list(kps),
     )
-    model = resolve_model(ModelTier.DEFAULT)  # 抽取用便宜模型即可
+    model = resolve_model(ModelTier.LOW)  # 后台抽取:用最便宜的 tier 控制开销
     resp = await client.chat.completions.create(
         model=model,
         response_format={"type": "json_object"},

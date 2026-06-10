@@ -10,6 +10,8 @@ import type {
   FollowUp,
   Material,
   MaterialType,
+  ModelTierId,
+  ModelTierInfo,
   StudentProfile,
   Subject,
 } from "./types";
@@ -53,28 +55,60 @@ async function getAccessToken(): Promise<string | null> {
   return data.session?.access_token ?? null;
 }
 
+/**
+ * 普通 REST 请求统一加 20s 超时 — 防止个别请求卡死整个交互
+ * (例如 createSession 时 supabase 网络抖动,前面会看到"点了半天没反应")。
+ * 调用方可以覆盖 timeoutMs 或传入自己的 signal。
+ */
 async function request<T>(
   path: string,
-  init: RequestInit = {},
+  init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<T> {
+  const { timeoutMs = 20_000, signal: externalSignal, ...rest } = init;
   const token = await getAccessToken();
-  const headers = new Headers(init.headers);
+  const headers = new Headers(rest.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const resp = await fetch(`${API_BASE}${path}`, { ...init, headers });
-  if (!resp.ok) {
-    let detail: string | undefined;
-    try {
-      const body = await resp.json();
-      detail = body.detail ?? body.message;
-    } catch {
-      // ignore
+  // 组合外部 signal 与内置 timeout signal
+  const ctrl = new AbortController();
+  const timeoutId = setTimeout(() => ctrl.abort(new Error("request timeout")), timeoutMs);
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      ctrl.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener("abort", () => ctrl.abort(externalSignal.reason), {
+        once: true,
+      });
     }
-    throw new Error(detail || `请求失败 ${resp.status}`);
   }
-  if (resp.status === 204) return undefined as T;
-  return (await resp.json()) as T;
+
+  try {
+    const resp = await fetch(`${API_BASE}${path}`, {
+      ...rest,
+      headers,
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) {
+      let detail: string | undefined;
+      try {
+        const body = await resp.json();
+        detail = body.detail ?? body.message;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail || `请求失败 ${resp.status}`);
+    }
+    if (resp.status === 204) return undefined as T;
+    return (await resp.json()) as T;
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new Error(`请求超时 (${Math.round(timeoutMs / 1000)}s),请检查网络后重试`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -90,6 +124,9 @@ export interface HealthConfig {
   openai_configured: boolean;
   supabase_configured: boolean;
   models: ModelInfo;
+  /** Phase 3.5: 5 档可选模型 */
+  model_tiers?: ModelTierInfo[];
+  default_tier?: ModelTierId;
   cors_origins: string[];
 }
 
@@ -197,6 +234,8 @@ export interface SendMessageHandlers {
 
 export interface SendMessageOptions {
   materialIds?: string[];
+  /** Phase 3.5: 学生临时选择的模型档位,后端会覆盖 agent 默认 tier */
+  modelTier?: ModelTierId | null;
 }
 
 export async function sendMessageStream(
@@ -210,6 +249,9 @@ export async function sendMessageStream(
   const body: Record<string, unknown> = { content };
   if (options.materialIds && options.materialIds.length > 0) {
     body.material_ids = options.materialIds;
+  }
+  if (options.modelTier) {
+    body.model_tier = options.modelTier;
   }
   const resp = await fetch(
     `${API_BASE}/api/chat/sessions/${sessionId}/messages`,

@@ -83,6 +83,7 @@ async def send_message(
             material_ids=payload.material_ids,
             student_profile=profile,
             background_tasks=background_tasks,
+            model_tier=payload.model_tier,
         ),
         media_type="text/event-stream",
         headers={

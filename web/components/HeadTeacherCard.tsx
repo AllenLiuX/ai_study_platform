@@ -1,6 +1,6 @@
 "use client";
 
-import { Compass, Sparkles } from "lucide-react";
+import { Compass, Loader2, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,9 +10,15 @@ interface HeadTeacherCardProps {
   onEnter?: () => void;
   /** 当前驱动模型,例如 gpt-4o-mini */
   modelLabel?: string;
+  /** 正在创建会话/跳转中,按钮显示 spinner 并禁用 */
+  busy?: boolean;
 }
 
-export function HeadTeacherCard({ onEnter, modelLabel }: HeadTeacherCardProps) {
+export function HeadTeacherCard({
+  onEnter,
+  modelLabel,
+  busy,
+}: HeadTeacherCardProps) {
   const agent = AGENTS.head_teacher;
   return (
     <Card className="relative overflow-hidden border-border bg-foreground text-background shadow-card">
@@ -33,9 +39,14 @@ export function HeadTeacherCard({ onEnter, modelLabel }: HeadTeacherCardProps) {
           size="lg"
           className="self-start bg-background text-foreground hover:bg-background/90 sm:self-center"
           onClick={onEnter}
+          disabled={busy}
         >
-          <Compass className="mr-1 h-5 w-5" />
-          找班主任规划一下
+          {busy ? (
+            <Loader2 className="mr-1 h-5 w-5 animate-spin" />
+          ) : (
+            <Compass className="mr-1 h-5 w-5" />
+          )}
+          {busy ? "正在打开对话…" : "找班主任规划一下"}
         </Button>
       </CardContent>
       <div

@@ -125,10 +125,15 @@ function ChatNavButton({ active }: { active: boolean }) {
         });
         router.push(`/chat/${created.id}`);
       }
+      // 跳转完成后不清 loading,等下一次 mount 时自动重置 (避免 spinner 闪烁)
     } catch (err) {
       console.error("[ChatNav] 跳转失败", err);
-    } finally {
       setLoading(false);
+      alert(
+        err instanceof Error
+          ? `无法打开对话:${err.message}`
+          : "无法打开对话,请稍后再试",
+      );
     }
   }
 

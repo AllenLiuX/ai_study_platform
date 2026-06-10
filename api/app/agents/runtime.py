@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import AsyncIterator
 
-from ..core.llm import stream_chat
+from ..core.llm import ModelTier, stream_chat
 from .registry import AgentConfig
 
 
@@ -97,15 +97,17 @@ async def stream_reply(
     student_profile: dict | None,
     rag_context: str | None = None,
     temperature: float = 0.5,
+    tier: ModelTier | None = None,
 ) -> AsyncIterator[str]:
-    """流式调用 LLM,逐段返回文本。"""
+    """流式调用 LLM,逐段返回文本。tier 优先 (学生临时覆盖),否则用 agent 默认。"""
     messages = build_messages(
         agent=agent,
         history=history,
         student_profile=student_profile,
         rag_context=rag_context,
     )
+    effective_tier = tier or agent.tier
     async for delta in stream_chat(
-        messages, tier=agent.tier, temperature=temperature
+        messages, tier=effective_tier, temperature=temperature
     ):
         yield delta

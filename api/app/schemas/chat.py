@@ -44,3 +44,6 @@ class SendMessageRequest(BaseModel):
     # - []: 显式不引用,与 None 等价
     # - [id1, id2]: 限定在这些资料中检索 top-k
     material_ids: list[str] | None = None
+    # Phase 3.5: 学生可在对话里临时选择模型档位 (low/medium/high/extra_high/max)
+    # None = 用 agent 默认 tier (= MEDIUM)
+    model_tier: str | None = None

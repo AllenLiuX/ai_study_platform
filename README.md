@@ -104,11 +104,44 @@
 - [x] **顶部"对话" tab**:`AppHeader` 加入「对话」入口,点击跳到最近一条 session;没有对话时为该学生即时创建一个 head_teacher 会话再进入
 - [x] `scripts/phase3_smoke.py`:**22 项断言**,验证 shape / 幂等 / `refresh=true` 推进 updated_at / dashboard.tasks 一致 / 有 progress 后任务包含多学科 + 至少 1 个 head_teacher + model 字段非空
 
+### Phase 3.5 — 跳转体感 / 资料层级 / 多模型档位 ✅
+
+针对真实使用反馈的三处打磨,把 MVP 从「能用」推到「顺手」:
+
+#### 1. 修复点击老师后跳转慢 / 不打开
+- **症状**:点击 Dashboard 上某个老师卡 / 任务卡后,Supabase / 后端网络抖动时整个交互"卡住",学生不知道按了没。
+- `lib/api.ts` 的统一 `request()` 加 **20s 超时 + AbortSignal**,任何 REST 请求超时都会抛友好错误("请求超时,请检查网络后重试")。
+- Dashboard 维护 `creatingKey` 状态:点击任意卡片后立即 disable + 显示 spinner,**防止重复点击多次建会话**;失败时在卡片上方 inline 错误条(不再用 alert)。
+- `HeadTeacherCard` / `SubjectProgressCard` / `TaskCard` 都加 `busy` prop,显示"正在打开…"。
+- 顶栏「对话」 tab 同步加 loading + 错误兜底。
+
+#### 2. 资料库层级化 (按学科分组 + 全选 + 搜索)
+- `MaterialPicker` 重写:**顶部搜索框** + **按"我上传的 / 数学 / 英语 / 语文"分组可折叠** + 每组**「全选 / 全取消」**按钮;默认只展开"我的",学科组折叠避免 50+ 平铺;搜索时自动展开。
+- `/materials` 公共资料 tab 同样按学科分 section + 可折叠 + 搜索;有学科 filter 时只展开 filter 那组。
+- 解决了之前"51 份公共讲义一齐铺开很难找"的问题。
+
+#### 3. 多模型档位 (low / medium / high / extra-high / max)
+- 后端 `ModelTier` 扩展为 5 档,每档暴露 `model name / capability(1-10) / cost(1-10) / desc` 元数据;`DEFAULT/PREMIUM` 保留为 `MEDIUM/HIGH` 的别名,旧调用代码零迁移。
+- 2026 默认映射 (`api/app/core/llm.py::_FALLBACK_MODELS`,`.env` 可覆盖):
+
+  | tier | model | $/1M in/out | 用途 |
+  |---|---|---|---|
+  | low | `gpt-5.4-mini` | $0.75 / $4.5 | 背单词、简短问答 |
+  | medium | `gpt-5.4` | $2.50 / $15 | **推荐默认**,日常对话 |
+  | high | `gpt-5.5` | $5 / $30 | 旗舰,复杂讲解 |
+  | extra_high | `o3` | $2 / $8 | 推理,长链思考 |
+  | max | `gpt-5.5-pro` | $30 / $180 | 顶级,压轴大题 |
+
+- 后台服务降级用 LOW(`progress_extractor` / `suggester` 抽取建议)、`task_planner` 用 MEDIUM 保证规划质量,避免 background 任务跟用户对话默认绑定升级。
+- `/health/config` 新增 `model_tiers[]` 和 `default_tier` 字段,前端 `ModelSelector` 直接渲染。
+- 前端在 chat 页右上角加 **`ModelSelector` 紧凑下拉**:展示当前 tier · model · 能力/开销 dot meter,选中后 `localStorage` 按 agent type 记忆,下次进同类老师对话自动用上一次选择;SSE 消息体加 `model_tier` 字段。
+- 推理类模型(`o*` 系列)自动跳过 `temperature` 参数,避免 API 报错。
+
 ### 后续 Phase Roadmap
 
-- **Phase 3.5 — 周/月学习报告**:聚合最近 7/30 天的学习节奏 + 掌握度变化曲线 + AI 生成总结(发送给家长前置)
-- **Phase 4 — 多模态**:图片(题目拍照)/ 手写公式 / 语音输入
-- **Phase 5 — 管理端 + 家长端**:平台公共资料管理 UI、学生列表/对话日志、家长视角周报、内容安全审核
+- **Phase 4 — 周/月学习报告**:聚合最近 7/30 天的学习节奏 + 掌握度变化曲线 + AI 生成总结(发送给家长前置)
+- **Phase 5 — 多模态**:图片(题目拍照)/ 手写公式 / 语音输入
+- **Phase 6 — 管理端 + 家长端**:平台公共资料管理 UI、学生列表/对话日志、家长视角周报、内容安全审核
 
 ---
 
@@ -119,7 +152,7 @@
 | 前端 | Next.js 14 (App Router) + TypeScript + Tailwind + 自写 shadcn 组件 + TanStack Query + `@supabase/ssr` |
 | 后端 | FastAPI + Pydantic + httpx + OpenAI SDK + `supabase-py` |
 | 数据库 | Supabase Postgres (含 Auth / Storage / pgvector) |
-| AI | OpenAI:`gpt-4o-mini` 默认 + `gpt-4o` 关键场景 + `text-embedding-3-small` (Phase 1) + `gpt-4o-mini` JSON mode 抽取学习进度 (Phase 2) + `gpt-4o-mini` JSON mode 生成每日任务 (Phase 3) |
+| AI | OpenAI 5 档可选 (Phase 3.5):**low** `gpt-5.4-mini` / **medium** `gpt-5.4` (默认) / **high** `gpt-5.5` / **extra-high** `o3` / **max** `gpt-5.5-pro`;`text-embedding-3-small` (Phase 1 RAG);后台抽取/建议用 LOW 控本,任务规划用 MEDIUM 保质;学生可在对话里随时切档 |
 | 部署 (后续) | Vercel (前端) + Railway/Render/自建 (后端) |
 
 ---
@@ -133,7 +166,7 @@ flowchart TB
   NextApp -->|"REST + SSE"| FastAPI["FastAPI Backend<br/>api/"]
   FastAPI -->|"Verify JWT"| SupabaseAuth
   FastAPI -->|"service role"| SupabaseDB["Supabase Postgres<br/>+ pgvector"]
-  FastAPI -->|"Chat / Embedding / JSON 抽取"| OpenAI["OpenAI API<br/>gpt-4o-mini / 4o"]
+  FastAPI -->|"5 档可选<br/>5.4-mini → 5.5-pro / o3"| OpenAI["OpenAI API"]
   SupabaseDB -->|"top-k cosine"| RAG["Material Chunks<br/>pgvector HNSW"]
   SupabaseDB -->|"knowledge_points<br/>+ student_progress"| Progress["学习进度<br/>(Phase 2)"]
   SupabaseDB -->|"student_daily_tasks"| Tasks["今日推荐任务<br/>(Phase 3)"]

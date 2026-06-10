@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Clock, Sparkles } from "lucide-react";
+import { ArrowRight, Clock, Loader2, Sparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,6 +12,8 @@ interface TaskCardProps {
   /** AI 班主任分析的模型 (展示用) */
   modelLabel?: string;
   onClick?: () => void;
+  /** 正在创建对应会话 / 跳转中 */
+  busy?: boolean;
 }
 
 const TAG_VARIANT: Record<
@@ -40,18 +42,29 @@ const TAG_VARIANT: Record<
   },
 };
 
-export function TaskCard({ task, modelLabel, onClick }: TaskCardProps) {
+export function TaskCard({ task, modelLabel, onClick, busy }: TaskCardProps) {
   const tagVariant = TAG_VARIANT[task.tag];
+  const interactive = !!onClick && !busy;
   return (
     <Card
-      className="group relative cursor-pointer overflow-hidden transition hover:-translate-y-0.5 hover:shadow-card"
-      onClick={onClick}
-      role={onClick ? "button" : undefined}
+      className={cn(
+        "group relative overflow-hidden transition",
+        interactive
+          ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-card"
+          : "cursor-default",
+        busy && "opacity-90",
+      )}
+      onClick={interactive ? onClick : undefined}
+      role={interactive ? "button" : undefined}
+      aria-busy={busy || undefined}
       title={task.starter_prompt}
     >
       <span
         aria-hidden
-        className="absolute inset-y-3 left-0 w-1 rounded-full bg-foreground/80 transition group-hover:bg-primary"
+        className={cn(
+          "absolute inset-y-3 left-0 w-1 rounded-full bg-foreground/80 transition",
+          interactive && "group-hover:bg-primary",
+        )}
       />
       <CardContent className="space-y-3 pl-6 pt-6">
         <div className="flex items-center justify-between">
@@ -78,10 +91,17 @@ export function TaskCard({ task, modelLabel, onClick }: TaskCardProps) {
             <Clock className="h-3.5 w-3.5" />
             预计 {task.estimated_minutes} 分钟
           </span>
-          <span className="flex items-center gap-1 text-foreground/60 opacity-0 transition group-hover:opacity-100">
-            一键开始
-            <ArrowRight className="h-3.5 w-3.5" />
-          </span>
+          {busy ? (
+            <span className="flex items-center gap-1 text-primary">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              正在打开…
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-foreground/60 opacity-0 transition group-hover:opacity-100">
+              一键开始
+              <ArrowRight className="h-3.5 w-3.5" />
+            </span>
+          )}
         </div>
         {modelLabel && (
           <div className="flex items-center gap-1 pt-1 text-[10px] text-primary/70">

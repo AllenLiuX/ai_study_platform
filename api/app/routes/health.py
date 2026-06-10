@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from ..core.config import get_settings
+from ..core.llm import DEFAULT_TIER, list_tiers, resolve_model
 
 router = APIRouter(tags=["health"])
 
@@ -22,10 +23,14 @@ async def config_check() -> dict:
         "openai_configured": bool(settings.openai_api_key)
         and not settings.openai_api_key.startswith("sk-proj-xxx"),
         "supabase_configured": settings.supabase_configured,
+        # 历史字段 (保持兼容,前端 Dashboard 用)
         "models": {
-            "default": settings.openai_chat_model_default,
-            "premium": settings.openai_chat_model_premium,
+            "default": resolve_model("medium"),
+            "premium": resolve_model("high"),
             "embedding": settings.openai_embedding_model,
         },
+        # Phase 3.5: 5 档模型完整列表 + 默认 tier,前端 ModelSelector 用
+        "model_tiers": list_tiers(),
+        "default_tier": DEFAULT_TIER.value,
         "cors_origins": settings.cors_origins_list,
     }

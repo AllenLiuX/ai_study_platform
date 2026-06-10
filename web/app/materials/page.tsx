@@ -1,7 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Library, Loader2, Sparkles } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Library,
+  Loader2,
+  Search,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
@@ -306,7 +314,48 @@ function PlatformTab({
   embeddingModel?: string;
   isLoading: boolean;
 }) {
-  const subjectKeys = Object.keys(bySubject).sort();
+  const SUBJECT_ORDER = ["math", "english", "chinese"];
+  const subjectKeys = [
+    ...SUBJECT_ORDER.filter((k) => k in bySubject),
+    ...Object.keys(bySubject).filter((k) => !SUBJECT_ORDER.includes(k)),
+  ];
+
+  const [query, setQuery] = useState("");
+  /** 折叠状态:undefined = 跟默认走 (按 subjectFilter 决定),true/false = 用户显式覆盖 */
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+
+  const kw = query.trim().toLowerCase();
+  const matched = useMemo(
+    () =>
+      kw
+        ? platform.filter((m) => m.title.toLowerCase().includes(kw))
+        : platform,
+    [platform, kw],
+  );
+  const matchedBySubject = useMemo(() => {
+    const map: Record<string, Material[]> = {};
+    for (const m of matched) {
+      const k = m.subject_id ?? "_other";
+      (map[k] ??= []).push(m);
+    }
+    return map;
+  }, [matched]);
+
+  function isCollapsed(subjectId: string): boolean {
+    if (subjectId in collapsed) return collapsed[subjectId];
+    if (kw) return false; // 搜索时全部展开
+    if (subjectFilter && subjectFilter !== subjectId) return true;
+    // 默认行为:有 filter 时只展开 filter 组;无 filter 时全部展开
+    return false;
+  }
+
+  function toggleCollapsed(subjectId: string) {
+    setCollapsed((c) => ({ ...c, [subjectId]: !isCollapsed(subjectId) }));
+  }
+
+  const visibleKeys = subjectFilter
+    ? subjectKeys.filter((k) => k === subjectFilter)
+    : subjectKeys;
 
   return (
     <div className="space-y-5">
@@ -322,8 +371,8 @@ function PlatformTab({
         </p>
       </div>
 
-      {/* 学科筛选 */}
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* 学科筛选 + 搜索 */}
+      <div className="flex flex-wrap items-center gap-2">
         <FilterChip
           active={subjectFilter === null}
           label="全部"
@@ -335,10 +384,30 @@ function PlatformTab({
             key={s}
             active={subjectFilter === s}
             label={SUBJECT_LABELS[s] ?? s}
-            count={bySubject[s].length}
+            count={bySubject[s]?.length ?? 0}
             onClick={() => onSubjectFilterChange(s)}
           />
         ))}
+        <div className="ml-auto flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1">
+          <Search className="h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索讲义标题…"
+            className="w-44 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              className="rounded-full p-0.5 text-muted-foreground hover:bg-secondary"
+              aria-label="清空"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
@@ -354,16 +423,54 @@ function PlatformTab({
             管理员可以用 <code>scripts/seed_platform_materials.py</code> 批量入库。
           </p>
         </div>
+      ) : matched.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border bg-background/40 p-10 text-center text-sm text-muted-foreground">
+          没有匹配 “{query}” 的讲义
+        </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {platform.map((m) => (
-            <MaterialCard
-              key={m.id}
-              material={m}
-              embeddingModel={embeddingModel}
-              readOnly
-            />
-          ))}
+        <div className="space-y-3">
+          {visibleKeys.map((s) => {
+            const items = matchedBySubject[s] ?? [];
+            if (items.length === 0) return null;
+            const open = !isCollapsed(s);
+            return (
+              <section
+                key={s}
+                className="overflow-hidden rounded-2xl border border-border bg-card"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleCollapsed(s)}
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-secondary/60"
+                >
+                  {open ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-sm font-semibold">
+                    {SUBJECT_LABELS[s] ?? s}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    · {items.length} 份讲义
+                  </span>
+                </button>
+                {open && (
+                  <div className="grid gap-3 border-t border-border/60 bg-background/40 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {items.map((m) => (
+                      <MaterialCard
+                        key={m.id}
+                        material={m}
+                        embeddingModel={embeddingModel}
+                        readOnly
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       )}
     </div>

@@ -1,9 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, Loader2, RefreshCw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import { HeadTeacherCard } from "@/components/HeadTeacherCard";
@@ -56,31 +56,56 @@ export default function DashboardPage() {
     [tasksPayload],
   );
 
-  async function enterAgent(type: AgentType) {
+  // 跳转中状态:点击一张卡 → 立即标记 → 显示 spinner + 阻止重复点击
+  // creatingKey 形如 "agent:math_teacher" / "task:<task_id>",同一时间只允许 1 个进行中
+  const [creatingKey, setCreatingKey] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const creatingRef = useRef<string | null>(null);
+
+  async function openSession(
+    key: string,
+    factory: () => Promise<{ id: string; queryAppend?: string }>,
+  ) {
+    if (creatingRef.current) return; // 防双点
+    creatingRef.current = key;
+    setCreatingKey(key);
+    setOpenError(null);
     try {
-      const agent = AGENTS[type];
+      const { id, queryAppend } = await factory();
+      // push 之后我们不主动清 creatingKey — 让 spinner 持续到新页加载完(避免闪烁)
+      router.push(`/chat/${id}${queryAppend ?? ""}`);
+    } catch (err) {
+      creatingRef.current = null;
+      setCreatingKey(null);
+      setOpenError(
+        err instanceof Error ? err.message : "无法打开对话,请稍后再试",
+      );
+    }
+  }
+
+  function enterAgent(type: AgentType) {
+    const agent = AGENTS[type];
+    void openSession(`agent:${type}`, async () => {
       const session = await chatApi.createSession({
         agent_type: type,
         subject_id: agent.subjectId,
       });
-      router.push(`/chat/${session.id}`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "无法创建对话,请稍后再试");
-    }
+      return { id: session.id };
+    });
   }
 
-  async function startTask(task: DailyTask) {
-    try {
+  function startTask(task: DailyTask) {
+    void openSession(`task:${task.id}`, async () => {
       const session = await chatApi.createSession({
         agent_type: task.agent_type,
         subject_id: task.subject_id ?? null,
         title: task.title.slice(0, 20),
       });
-      const promptParam = encodeURIComponent(task.starter_prompt);
-      router.push(`/chat/${session.id}?prompt=${promptParam}`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "无法开始任务,请稍后再试");
-    }
+      return {
+        id: session.id,
+        queryAppend: `?prompt=${encodeURIComponent(task.starter_prompt)}`,
+      };
+    });
   }
 
   return (
@@ -97,6 +122,24 @@ export default function DashboardPage() {
               profile={dashboardQuery.data.profile}
               modelStack={modelStack}
             />
+
+            {openError && (
+              <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="flex-1">
+                  <div className="font-medium">打开对话失败</div>
+                  <div className="text-xs text-destructive/80">{openError}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpenError(null)}
+                  className="rounded p-1 text-destructive/60 hover:bg-destructive/10"
+                  aria-label="关闭"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
 
             <section className="space-y-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -146,6 +189,7 @@ export default function DashboardPage() {
                       task={t}
                       modelLabel={tasksPayload?.model ?? undefined}
                       onClick={() => startTask(t)}
+                      busy={creatingKey === `task:${t.id}`}
                     />
                   ))
                 )}
@@ -157,6 +201,7 @@ export default function DashboardPage() {
               <HeadTeacherCard
                 onEnter={() => enterAgent("head_teacher")}
                 modelLabel={models?.default}
+                busy={creatingKey === "agent:head_teacher"}
               />
             </section>
 
@@ -178,6 +223,7 @@ export default function DashboardPage() {
                       progress={progress}
                       modelLabel={models?.default}
                       onEnter={() => enterAgent(type)}
+                      busy={creatingKey === `agent:${type}`}
                     />
                   );
                 })}

@@ -149,7 +149,7 @@ async def suggest_follow_ups(
 
     try:
         client = get_client()
-        model = resolve_model(ModelTier.DEFAULT)
+        model = resolve_model(ModelTier.LOW)  # 后台跟进建议:用最便宜的 tier
         resp = await client.chat.completions.create(
             model=model,
             response_format={"type": "json_object"},
