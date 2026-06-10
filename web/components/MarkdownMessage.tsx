@@ -23,11 +23,59 @@ interface MarkdownMessageProps {
   className?: string;
 }
 
+/**
+ * 把 LLM 输出里的 `\(...\)` `\[...\]` 这种 KaTeX 风格分隔符 normalize 成
+ * remark-math 能识别的 `$...$` / `$$...$$`。
+ *
+ * 为什么需要这一步:markdown 解析时反斜杠是转义字符,`\[` 会被吞成 `[`,
+ * 反而吃掉 math 分隔符,导致公式被显示为纯文本(参见 bug:"markdown 显示
+ * 的公式显示的是原始 string,没有渲染")。
+ *
+ * 跳过 fenced code (```...```) 和 inline code (`...`),避免改坏代码示例。
+ */
+function normalizeMathDelimiters(input: string): string {
+  let out = "";
+  let i = 0;
+  let inFenced = false;
+  let inInline = false;
+  while (i < input.length) {
+    if (!inInline && input.startsWith("```", i)) {
+      inFenced = !inFenced;
+      out += "```";
+      i += 3;
+      continue;
+    }
+    if (!inFenced && input[i] === "`") {
+      inInline = !inInline;
+      out += "`";
+      i += 1;
+      continue;
+    }
+    if (!inFenced && !inInline && input[i] === "\\") {
+      const next = input[i + 1];
+      if (next === "[" || next === "]") {
+        out += "$$";
+        i += 2;
+        continue;
+      }
+      if (next === "(" || next === ")") {
+        out += "$";
+        i += 2;
+        continue;
+      }
+    }
+    out += input[i];
+    i += 1;
+  }
+  return out;
+}
+
 function MarkdownMessageImpl({
   content,
   variant = "assistant",
   className,
 }: MarkdownMessageProps) {
+  const normalized = normalizeMathDelimiters(content);
   return (
     <div
       className={cn(
@@ -68,7 +116,7 @@ function MarkdownMessageImpl({
           // react-markdown 会把 [1] 当成普通文字渲染,这里靠 CSS 自动处理即可
         }}
       >
-        {content}
+        {normalized}
       </ReactMarkdown>
     </div>
   );

@@ -273,7 +273,13 @@ export default function ChatSessionPage() {
         />
 
         <div className="flex flex-1 flex-col">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-background/70 px-4 py-2 backdrop-blur sm:px-6">
+          {/*
+            chat header 必须 relative + z-30:否则 ModelSelector 的 popover
+            会被下方 ChatWindow 容器(overflow-y-auto 自带新 stacking context)
+            盖住,即使 popover 自己 z-40 也救不回来 — 因为不同 sibling 的
+            stacking context 独立。
+          */}
+          <div className="relative z-30 flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-background/70 px-4 py-2 backdrop-blur sm:px-6">
             <div className="flex items-center gap-2 text-sm">
               <span className="flex h-6 w-6 items-center justify-center rounded-md bg-foreground text-xs text-background">
                 {agent.emoji}
