@@ -6,7 +6,7 @@ import type { Metadata, Viewport } from "next";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "学生学习驾驶舱 · AI Study Coach",
+  title: "AI 自适应学习平台 · Adaptive AI Study Platform",
   description:
     "面向中国初高中学生的 AI 学习平台。班主任 Agent 帮你规划,各科老师 Agent 负责讲解,陪你一起把每一次提问变成下一次更个性化的学习建议。",
 };

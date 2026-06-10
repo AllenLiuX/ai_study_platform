@@ -11,9 +11,14 @@ export default function AuthLayout({
         <header className="py-8">
           <Link href="/" className="inline-flex items-center gap-2">
             <span className="text-2xl">🧭</span>
-            <span className="text-lg font-semibold tracking-tight">
-              学生学习驾驶舱
-            </span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-lg font-semibold tracking-tight">
+                AI 自适应学习平台
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                Adaptive AI Study Platform
+              </span>
+            </div>
           </Link>
         </header>
         <main className="flex flex-1 items-center justify-center pb-16">

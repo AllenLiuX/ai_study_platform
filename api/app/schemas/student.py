@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Grade = Literal["初一", "初二", "初三", "高一", "高二", "高三"]
+LearnerType = Literal["k12_student", "free_learner"]
 
 
 class StudentProfile(BaseModel):
@@ -19,6 +20,9 @@ class StudentProfile(BaseModel):
     target_exam: str | None = None
     learning_goal: str | None = None
     focus_subjects: list[str] = Field(default_factory=list)
+    # Phase 5: 学习者类型 + 自由学习者的关注领域
+    learner_type: LearnerType = "k12_student"
+    focus_domains: list[str] = Field(default_factory=list)
     onboarding_completed: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -32,6 +36,8 @@ class StudentProfileUpdate(BaseModel):
     target_exam: str | None = None
     learning_goal: str | None = None
     focus_subjects: list[str] | None = None
+    learner_type: LearnerType | None = None
+    focus_domains: list[str] | None = None
     onboarding_completed: bool | None = None
 
 

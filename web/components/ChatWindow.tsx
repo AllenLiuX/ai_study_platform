@@ -2,25 +2,31 @@
 
 import {
   ArrowRight,
+  BookOpen,
+  Check,
   Compass,
   FileText,
   Loader2,
+  Notebook,
   PencilLine,
   RotateCcw,
   Sparkles,
   User,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { MarkdownMessage } from "@/components/MarkdownMessage";
-import { AGENTS } from "@/lib/agents";
-import { chatApi } from "@/lib/api";
+import { resolveAgentMeta } from "@/lib/agents";
+import { chatApi, notesApi } from "@/lib/api";
+import { useAgents } from "@/lib/hooks/useAgents";
 import type {
   AgentType,
   ChatMessage,
   Citation,
   FollowUp,
   FollowUpType,
+  KnowledgeNote,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -46,7 +52,8 @@ export function ChatWindow({
   modelLabel,
   onFollowUpClick,
 }: ChatWindowProps) {
-  const agent = AGENTS[agentType];
+  const { data: dynamicAgents } = useAgents();
+  const agent = resolveAgentMeta(agentType, dynamicAgents);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -211,7 +218,8 @@ function MessageBubble({
   modelLabel?: string;
 }) {
   const isUser = message.role === "user";
-  const agent = AGENTS[agentType];
+  const { data: dynamicAgents } = useAgents();
+  const agent = resolveAgentMeta(agentType, dynamicAgents);
   const citations =
     (message.metadata?.citations as Citation[] | undefined) ?? [];
   const imagePaths =
@@ -275,14 +283,95 @@ function MessageBubble({
           <CitationList citations={citations} />
         )}
 
-        {!isUser && !isPlaceholder && messageModel && (
-          <div className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground/80">
-            <Sparkles className="h-3 w-3 text-primary/70" />
-            <span>由 {messageModel} 生成</span>
+        {!isUser && !isPlaceholder && (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            {messageModel ? (
+              <div className="flex items-center gap-1 text-[11px] text-muted-foreground/80">
+                <Sparkles className="h-3 w-3 text-primary/70" />
+                <span>由 {messageModel} 生成</span>
+              </div>
+            ) : (
+              <span />
+            )}
+            {message.id && !isStreaming && (
+              <SaveToNoteButton messageId={message.id} />
+            )}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Phase 5: 把当前 assistant 回复 → 蒸馏成"知识点笔记" 一键存到 /notes。
+ * 后端调用 LLM 提取 title/summary/content/tags,异步切片做 RAG。
+ */
+function SaveToNoteButton({ messageId }: { messageId: string }) {
+  const [status, setStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [savedNote, setSavedNote] = useState<KnowledgeNote | null>(null);
+
+  async function save() {
+    if (status === "saving") return;
+    setStatus("saving");
+    setError(null);
+    try {
+      const note = await notesApi.createFromMessage({ message_id: messageId });
+      setSavedNote(note);
+      setStatus("saved");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存失败");
+      setStatus("error");
+    }
+  }
+
+  if (status === "saved" && savedNote) {
+    return (
+      <Link
+        href={`/notes/${savedNote.id}`}
+        className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2 py-1 text-[11px] text-primary transition hover:bg-primary/10"
+        title="点击打开笔记"
+      >
+        <Check className="h-3 w-3" />
+        已存为笔记 · 打开
+        <BookOpen className="h-3 w-3 opacity-60" />
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={save}
+      disabled={status === "saving"}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition",
+        status === "error"
+          ? "border-destructive/30 bg-destructive/5 text-destructive"
+          : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
+      )}
+      title={error || "把这一轮蒸馏成可复用的知识点笔记"}
+    >
+      {status === "saving" ? (
+        <>
+          <Loader2 className="h-3 w-3 animate-spin" />
+          正在蒸馏…
+        </>
+      ) : status === "error" ? (
+        <>
+          <Notebook className="h-3 w-3" />
+          重试保存为笔记
+        </>
+      ) : (
+        <>
+          <Notebook className="h-3 w-3" />
+          保存为笔记
+        </>
+      )}
+    </button>
   );
 }
 
@@ -340,31 +429,50 @@ function ChatMessageImages({ paths }: { paths: string[] }) {
 }
 
 function CitationList({ citations }: { citations: Citation[] }) {
+  const materialCount = citations.filter(
+    (c) => (c.source ?? "material") === "material",
+  ).length;
+  const noteCount = citations.length - materialCount;
   return (
     <div className="surface-ai mt-3 rounded-xl border px-3 py-2 text-xs">
       <div className="mb-1.5 flex items-center gap-1.5 text-primary">
         <FileText className="h-3 w-3" />
         <span className="font-medium">
-          基于你的资料回答 · 引用了 {citations.length} 段
+          基于
+          {materialCount > 0 && `资料 ${materialCount}`}
+          {materialCount > 0 && noteCount > 0 && " + "}
+          {noteCount > 0 && `笔记 ${noteCount}`}
+          回答 · 共 {citations.length} 段
         </span>
       </div>
       <ol className="flex flex-col gap-1">
-        {citations.map((c, i) => (
-          <li
-            key={`${c.material_id}-${c.chunk_index}-${i}`}
-            className="flex items-start gap-1.5 text-muted-foreground"
-          >
-            <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/10 px-1 text-[10px] font-semibold text-primary">
-              {i + 1}
-            </span>
-            <span className="flex-1 truncate">
-              《{c.material_title}》第 {c.chunk_index + 1} 段
-              <span className="ml-1 text-muted-foreground/60">
-                · 相似度 {(c.similarity * 100).toFixed(0)}%
+        {citations.map((c, i) => {
+          const src = c.source ?? "material";
+          const title =
+            c.source_title || c.material_title || c.note_title || "(无标题)";
+          const key = `${c.source_id ?? c.material_id ?? c.note_id ?? "x"}-${c.chunk_index}-${i}`;
+          return (
+            <li
+              key={key}
+              className="flex items-start gap-1.5 text-muted-foreground"
+            >
+              <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/10 px-1 text-[10px] font-semibold text-primary">
+                {i + 1}
               </span>
-            </span>
-          </li>
-        ))}
+              <span className="flex-1 truncate">
+                {src === "note" ? (
+                  <span className="mr-1 inline-flex items-center gap-0.5 rounded bg-secondary px-1 text-[9px] uppercase tracking-wider">
+                    笔记
+                  </span>
+                ) : null}
+                《{title}》第 {c.chunk_index + 1} 段
+                <span className="ml-1 text-muted-foreground/60">
+                  · 相似度 {(c.similarity * 100).toFixed(0)}%
+                </span>
+              </span>
+            </li>
+          );
+        })}
       </ol>
     </div>
   );

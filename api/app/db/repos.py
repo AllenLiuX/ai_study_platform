@@ -276,3 +276,162 @@ def get_recent_chapter(user_id: str, subject_id: str) -> dict | None:
     ).execute()
     rows = resp.data or []
     return rows[0] if rows else None
+
+
+# -----------------------------------------------------------------------------
+# User Agents (Phase 5) - 自定义老师
+# -----------------------------------------------------------------------------
+def list_user_agents(owner_id: str) -> list[dict]:
+    """读 owner 可见的所有老师 (平台 + 私有),按更新时间倒序。"""
+    client = get_admin_client()
+    resp = (
+        client.table("user_agents")
+        .select("*")
+        .or_(f"owner_type.eq.platform,owner_id.eq.{owner_id}")
+        .eq("is_active", True)
+        .order("owner_type", desc=False)  # platform 在前
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return resp.data or []
+
+
+def get_user_agent_by_key(agent_key: str, owner_id: str | None = None) -> dict | None:
+    """按 agent_key 查老师 (主键唯一)。owner_id 传入时做归属检查,None 时不做。"""
+    client = get_admin_client()
+    q = client.table("user_agents").select("*").eq("agent_key", agent_key)
+    resp = q.maybe_single().execute()
+    row = resp.data if resp else None
+    if row and owner_id is not None:
+        if row["owner_type"] == "platform":
+            return row
+        if row["owner_type"] == "user" and row.get("owner_id") == owner_id:
+            return row
+        return None
+    return row
+
+
+def create_user_agent(*, owner_id: str, payload: dict) -> dict:
+    """创建私有老师 (owner_type 固定 user,owner_id 后端注入)。"""
+    client = get_admin_client()
+    row = {
+        **payload,
+        "owner_type": "user",
+        "owner_id": owner_id,
+    }
+    resp = client.table("user_agents").insert(row).execute()
+    return (resp.data or [row])[0]
+
+
+def update_user_agent(
+    *, agent_key: str, owner_id: str, fields: dict
+) -> dict | None:
+    """更新私有老师 (平台老师禁止编辑)。"""
+    client = get_admin_client()
+    resp = (
+        client.table("user_agents")
+        .update(fields)
+        .eq("agent_key", agent_key)
+        .eq("owner_type", "user")
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def delete_user_agent(*, agent_key: str, owner_id: str) -> bool:
+    """删除私有老师 (软删 — 标记 is_active=false,保留 chat_sessions 历史可读)。"""
+    client = get_admin_client()
+    resp = (
+        client.table("user_agents")
+        .update({"is_active": False})
+        .eq("agent_key", agent_key)
+        .eq("owner_type", "user")
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    return bool(resp.data)
+
+
+# -----------------------------------------------------------------------------
+# Knowledge Notes (Phase 5) - 笔记 = 私有知识点
+# -----------------------------------------------------------------------------
+def list_notes(
+    owner_id: str,
+    *,
+    agent_key: str | None = None,
+    tag: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    client = get_admin_client()
+    q = (
+        client.table("knowledge_notes")
+        .select("*")
+        .eq("owner_id", owner_id)
+        .order("updated_at", desc=True)
+        .limit(limit)
+    )
+    if agent_key:
+        q = q.eq("agent_key", agent_key)
+    if tag:
+        # jsonb @> 用 contains
+        q = q.contains("tags", [tag])
+    resp = q.execute()
+    return resp.data or []
+
+
+def get_note(note_id: str, owner_id: str) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("knowledge_notes")
+        .select("*")
+        .eq("id", note_id)
+        .eq("owner_id", owner_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def insert_note(payload: dict) -> dict:
+    client = get_admin_client()
+    resp = client.table("knowledge_notes").insert(payload).execute()
+    return (resp.data or [payload])[0]
+
+
+def update_note(note_id: str, owner_id: str, fields: dict) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("knowledge_notes")
+        .update(fields)
+        .eq("id", note_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def delete_note(note_id: str, owner_id: str) -> bool:
+    client = get_admin_client()
+    resp = (
+        client.table("knowledge_notes")
+        .delete()
+        .eq("id", note_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    return bool(resp.data)
+
+
+def insert_note_chunks(rows: list[dict]) -> None:
+    if not rows:
+        return
+    client = get_admin_client()
+    client.table("knowledge_note_chunks").insert(rows).execute()
+
+
+def delete_note_chunks(note_id: str) -> None:
+    client = get_admin_client()
+    client.table("knowledge_note_chunks").delete().eq("note_id", note_id).execute()

@@ -1,8 +1,8 @@
-# 学生学习驾驶舱 (AI Study Coach)
+# AI 自适应学习平台 (Adaptive AI Study Platform)
 
-> 让每个初高中学生都有一个能记住学习进度的课后 AI 学习助手。
+> 让每个学习者 — 不只是初高中学生,也包括转岗工程师、面试者、终身学习者 — 都拥有一组能记住学习进度、可定制的 AI 老师。
 
-班主任 Agent 帮你做规划,各科老师 Agent 负责讲解,资料库提供可信上下文,学习进度系统沉淀学生画像 — 让每一次提问都能变成下一次更个性化的学习建议。
+平台提供 4 位内置学科老师(班主任 / 数学 / 英语 / 语文)+ **自定义老师**(Phase 5),每位老师可挂自己的资料库,在对话中**渐进披露**式地作为引用;每一轮 AI 回答都能一键**蒸馏成知识点笔记**,自动入 RAG,下次再聊到这块就被召回。
 
 详细产品设计见 [product_design.md](product_design.md)。
 
@@ -182,11 +182,58 @@
 
 > 用法:在 `/materials` 直接拖一张题目卡 / 板书照 / 扫描版讲义 PDF → 后台几秒后变 `ready` → 对话时勾选这份资料,数学老师就能引用图里的公式回答。成本:单张图约 $0.0008,20 页 PDF 约 $0.016。
 
+### Phase 5 — 自适应学习平台 (自定义老师 + 知识点笔记 + 自由学习者) ✅
+
+把"K12 学生学习驾驶舱"扩展成**通用自适应学习平台**:任何学习方向(面试 / 转岗 / 自学新领域)都能新建一位专属 AI 老师,挂自己的资料库,在对话中蒸馏出可复用的知识点笔记。
+
+#### 1. 自定义老师 (User Agents)
+
+- DB 表 [`user_agents`](supabase/migrations/0006_phase5_user_agents.sql):`owner_type ∈ {platform, user}` + RLS(平台老师全员可见,用户老师只能看/改自己的),4 个内置老师 seed 进 DB(`system_prompt=NULL`,真值仍来自 prompt 文件),`is_active` 软删除保护历史 session。
+- **双源 registry** ([`agents/registry.py`](api/app/agents/registry.py)):`resolve_agent(agent_key, owner_id)` 优先查 DB → DB 命中且 `system_prompt` 非空用 DB → 否则 fallback 到内置 prompt 文件;**Supabase 网络抖动时内置老师仍走 hardcoded fallback**(韧性)。
+- **`AgentConfig` 扩展**:`inline_system_prompt` / `default_material_ids` / `domains` / `emoji` / `tagline` / `role` / `starter_prompts` / `owner_type` — 所有展示与行为字段都从 DB 取。
+- **`AgentType` 由 `Literal[...]` 改为 `str`**:`chat_messages.agent_type` 现在直接存 `agent_key`(平台 / 用户老师同一字段),旧 session 完全兼容。
+- **CRUD API** ([`routes/agents.py`](api/app/routes/agents.py),6 个端点):`GET /api/agents` 列平台+自己的、`POST /api/agents` 创建私有、`GET/PATCH/DELETE /api/agents/{agent_key}`、**`POST /api/agents/_generate`** — 输入"目标领域 + 大致角色 + 任意附加说明",`gpt-5.4` JSON mode 一键生成 `system_prompt` / `tagline` / `role` / `domains` / `starter_prompts` 草稿,再让用户改。
+- **前端 `/agents`**:列表分「平台老师 · 用户老师」两栏,卡片支持「开新会话 / 编辑 / 删除」,删除走软删除提示 "保留历史对话不受影响"。
+- **前端 `/agents/new` + `/agents/[key]/edit`**:同一个 `AgentForm` 组件 — 字段分 4 区(身份 / 系统提示 / starter prompts / 资料绑定),右侧 "AI 帮我生成" 抽屉调 `_generate` 端点;`agent_key` 自动 slug 化 + 唯一性校验,内置老师禁止编辑。
+- **资料绑定 → 渐进披露**:`AgentConfig.default_material_ids` 决定进会话时 `MaterialPicker` 默认勾选哪些,学生可手动再加;RAG 召回时**这些资料 + 学生勾选的资料 + 学生的笔记**一起进 retrieval。
+
+#### 2. 知识点笔记 (Knowledge Notes) 
+
+笔记不是平行模块,**就是"私有知识点"**,与资料库同等架构 + 第一公民地位进 RAG。
+
+- DB 表 [`knowledge_notes` + `knowledge_note_chunks`](supabase/migrations/0007_phase5_knowledge_notes.sql):`title` / `summary`(2-3 句) / `content` (markdown) / `tags[]` / `source_message_id` / `agent_key` / `domains[]` / `confidence(0-1)` / 复习字段(`last_reviewed_at` / `review_count` / `next_review_at`);chunks 表持 `embedding vector(1536)` + `chunk_status` + RLS(只读自己)。
+- **从对话蒸馏** ([`services/notes_service.py`](api/app/services/notes_service.py)):每条 AI 回答下方加 **"保存为笔记"** 按钮 → `POST /api/notes/from_message` → 把 `(question, answer)` 一起喂 `gpt-5.4` JSON mode,输出 `{title, summary, content, tags}`;调用 `notes_indexer.process_note` 异步切片 + embed → 5 秒内进 RAG 池。
+- **RPC `match_knowledge_notes`** + retrieval 合并:[`services/retrieval.py`](api/app/services/retrieval.py) 重构 — `retrieve_for_chat()` 一次 embed,**同时召回 materials(top_k=5) + notes(top_k=3)**,跨源 merge 按 similarity 排序;`RetrievedChunk.source ∈ {material, note}` 在 prompt context 里加 `[来源类型 · 标题]` 标签,citations 也带上 `source` 让前端区分徽章。
+- **前端 `/notes`**:树形列表,顶部按 agent / tag / 域 filter,搜索;每条显示 chunk status(已入 RAG / 待索引 / 失败)。
+- **前端 `/notes/[id]`**:左侧 markdown 编辑器 + tag/标题编辑 + "重新生成 embedding" 按钮;右侧"今天复习一下"自评条(💡熟悉 / 🤔有印象 / 😅忘了)→ 更新 `last_reviewed_at` 推动间隔重复(为后续 SRS 留接口)。
+- **聊天页 `SaveToNoteButton`**:每条 assistant 消息脚注小按钮 — `idle → 正在蒸馏 → ✓ 已存为笔记 · 打开` 三态,失败提示重试;一键就把"刚学会的这块"沉淀下来。
+
+#### 3. 自由学习者 (Free Learner) + 品牌重命名
+
+- **DB** [0008_phase5_profile_extension.sql](supabase/migrations/0008_phase5_profile_extension.sql):`student_profiles` 加 `learner_type ∈ {k12_student, free_learner}` + `focus_domains text[]`;`grade` 改 nullable(自由学习者不填年级)。
+- **Onboarding 分支**:第一步选「K12 学生 / 自由学习者」;K12 走原 3 步(年级 + 科目 + 目标);自由学习者改成「关注领域(预设 + 自定义,如 *Machine Learning*, *System Design*, *Quant Trading*)+ 学习目标」。
+- **Dashboard 分流**:
+  - K12 仍是「班主任卡 + 4 学科卡 + 推荐任务」
+  - 自由学习者首页是「班主任 + **+ 创建/管理你的专属老师 (N)** 入口 + 知识点笔记入口」,引导 `/agents` 自定义老师
+- **品牌升级**:全站标题 / 顶栏 / Onboarding logo 从「学生学习驾驶舱」改为「**AI 自适应学习平台 · Adaptive AI Study Platform**」;`<head>` title 同步更新。
+
+#### 验证
+
+- DB 迁移 3 个文件(0006 / 0007 / 0008)远端已 apply;4 个 builtin agents 已 seed,RLS 已生效。
+- 后端 import-time smoke:`scripts/phase5_smoke.py` 验证 `resolve_agent` / `AgentConfig` 字段完整 / DB miss 走 builtin / agents 与 notes routes 注册成功 / `retrieve_for_chat` shape。
+- 前端 `tsc --noEmit` 全绿,新页面 `/agents` / `/agents/new` / `/agents/[key]/edit` / `/notes` / `/notes/[id]` / `/notes/new` 全打通。
+
+> 用法 — 假设你要面试一家量化公司的 ML Engineer 职位:
+> 1. `/agents` → 新建「System Design Teacher」,描述 "帮我系统学习算法系统设计、Agent 框架、事件驱动量化系统、期权交易系统",AI 自动写好 system prompt 草稿
+> 2. `/materials` 上传几份相关 PDF / 论文 / 自己的笔记 → 在老师页面把这些资料勾上 `default_material_ids`
+> 3. 进会话提"帮我规划下两周的学习节奏" → 老师拆出 10 个核心知识点
+> 4. 一个个聊 → 每聊完一个核心点点「保存为笔记」 → 知识点沉淀到笔记库,下次再聊会自动召回 → 复习时也能在 `/notes` 看 markdown 总结
+
 ### 后续 Phase Roadmap
 
-- **Phase 5 — 学习报告 + 任务闭环**:聚合最近 7/30 天的学习节奏 + 掌握度变化曲线 + AI 生成总结(发送给家长前置);今日任务加 `pending/in_progress/completed` 状态 + 班主任对话尾问"今天的任务完成了吗"
-- **Phase 6 — 作业辅导深化**:题目分步引导 prompt(不直接给答案、先问卡在哪一步) + 错因分类(概念/公式/审题/计算/方法/表达) + 错题本工作流
-- **Phase 7 — 管理端 + 家长端**:平台公共资料管理 UI、学生列表/对话日志、家长视角周报、内容安全审核、防沉迷使用时长提醒
+- **Phase 6 — 学习计划 + 复习闭环**:基于笔记的间隔重复 SRS(到期就出题)、学习路径树(老师把领域拆成 DAG 节点 → 节点 ↔ 笔记 ↔ 资料 三向链接)、`student_daily_tasks` 与节点状态联动
+- **Phase 7 — 作业辅导深化**:题目分步引导 prompt(不直接给答案、先问卡在哪一步) + 错因分类(概念/公式/审题/计算/方法/表达) + 错题本工作流
+- **Phase 8 — 管理端 + 家长端 + 团队协作**:平台公共资料管理 UI、学生 / 学员列表、对话日志、家长 / 导师视角周报、笔记 / 老师在团队内共享(`owner_type='team'`)、内容安全审核
 
 ---
 
@@ -215,12 +262,16 @@ flowchart TB
   SupabaseDB -->|"top-k cosine"| RAG["Material Chunks<br/>pgvector HNSW"]
   SupabaseDB -->|"knowledge_points<br/>+ student_progress"| Progress["学习进度<br/>(Phase 2)"]
   SupabaseDB -->|"student_daily_tasks"| Tasks["今日推荐任务<br/>(Phase 3)"]
-  Browser -->|"upload PDF/MD"| Storage["Supabase Storage<br/>materials/"]
+  SupabaseDB -->|"user_agents<br/>RLS owner/platform"| AgentsDB["自定义老师<br/>(Phase 5)"]
+  SupabaseDB -->|"knowledge_notes + chunks<br/>同 pgvector RAG"| Notes["知识点笔记<br/>(Phase 5)"]
+  Browser -->|"upload PDF/MD/图片"| Storage["Supabase Storage<br/>materials/"]
   Browser -->|"拍照传题 (Phase 4)"| ChatImg["Supabase Storage<br/>chat-attachments/"]
   FastAPI -.->|"BackgroundTasks<br/>parse → chunk → embed"| Storage
   FastAPI -.->|"download → base64<br/>OpenAI vision input"| ChatImg
   FastAPI -.->|"BackgroundTasks<br/>抽取 KP + 更新 mastery"| Progress
-  FastAPI -.->|"gpt-4o-mini JSON<br/>规划 3 件事"| Tasks
+  FastAPI -.->|"gpt-5.4 JSON<br/>规划 3 件事"| Tasks
+  FastAPI -.->|"gpt-5.4 JSON<br/>蒸馏对话→笔记"| Notes
+  RAG -.->|"materials + notes<br/>跨源 merge"| FastAPI
 ```
 
 ---
@@ -255,30 +306,40 @@ student_coach/
     phase2_smoke.py                 # Phase 2 (学习进度) 后端冒烟
     phase25_smoke.py                # Phase 2.5 (follow-up 引导) 后端冒烟
     phase3_smoke.py                 # Phase 3 (今日推荐任务) 后端冒烟
+    phase4_smoke.py                 # Phase 4 (图片对话) 后端冒烟
+    phase41_smoke.py                # Phase 4.1 (资料视觉提取) 后端冒烟
+    phase5_smoke.py                 # Phase 5 (自定义老师 + 笔记) 后端冒烟
     frontend_smoke.py               # 前端路由 + 中间件冒烟
     apply_migration.py              # psycopg 直连应用任意 .sql migration
     generate_knowledge_notes.py     # Phase 1.5: 基于课标生成 AI 讲义
     seed_platform_materials.py      # Phase 1.5: 把讲义入库为 platform 资料
     seed_knowledge_points.py        # Phase 2: 把知识点树入库
+  supabase/migrations/
+    0001..0005_phase0~4.sql         # Phase 0~4 schema
+    0006_phase5_user_agents.sql     # Phase 5: user_agents 表 + RLS + 4 builtin seed
+    0007_phase5_knowledge_notes.sql # Phase 5: knowledge_notes / chunks + match_knowledge_notes RPC
+    0008_phase5_profile_extension.sql # Phase 5: learner_type + focus_domains + grade nullable
   web/                     # Next.js 前端
     app/
       (auth)/login         (auth)/signup
-      onboarding
-      dashboard
-      materials            # 资料库 (Phase 1)
+      onboarding           # K12 / 自由学习者 分支
+      dashboard            # K12: 4 学科卡 / 自由学习者: 自定义老师入口
+      materials            # 资料库 (Phase 1 + 4.1 视觉)
+      agents               # /agents 列表 · /agents/new · /agents/[key]/edit (Phase 5)
+      notes                # /notes 列表 · /notes/[id] · /notes/new (Phase 5)
       chat/[sessionId]
-    components/            # MarkdownMessage / MaterialUploader / MaterialPicker / ChatWindow ...
-    lib/                   # supabase 客户端、api 封装、agents 配置、types
+    components/            # MarkdownMessage / MaterialUploader / MaterialPicker / ChatWindow / AgentForm / SaveToNoteButton ...
+    lib/                   # supabase 客户端、api 封装、agents 配置 (含 resolveAgentMeta)、types
     middleware.ts          # 路由级登录保护
   api/                     # FastAPI 后端
     app/
       main.py
-      core/                # config / auth / llm
-      routes/              # chat / students / materials / health
-      services/            # chat_service / parser / chunker / embedding / retrieval / material_processor / progress_extractor / suggester / task_planner
-      agents/              # registry + 四个 prompt 文件 + runtime
-      db/                  # supabase_client + repos
-      schemas/             # Pydantic 模型 (含 material)
+      core/                # config / auth / llm (5 档 ModelTier)
+      routes/              # chat / students / materials / health / agents / notes
+      services/            # chat_service / parser / chunker / embedding / retrieval (跨源) / material_processor / vision_extractor / progress_extractor / suggester / task_planner / notes_service / notes_indexer
+      agents/              # registry (双源: DB + builtin fallback) + 4 prompt 文件 + runtime
+      db/                  # supabase_client + repos (含 user_agents / knowledge_notes CRUD)
+      schemas/             # Pydantic 模型 (含 agent / note)
     requirements.txt
 ```
 
@@ -298,6 +359,10 @@ student_coach/
    - [supabase/migrations/0002_phase1_materials.sql](supabase/migrations/0002_phase1_materials.sql) — 资料库 + pgvector + Storage 桶
    - [supabase/migrations/0003_phase2_progress.sql](supabase/migrations/0003_phase2_progress.sql) — 知识点树 + student_progress + 聚合 RPC
    - [supabase/migrations/0004_phase3_daily_tasks.sql](supabase/migrations/0004_phase3_daily_tasks.sql) — 今日推荐任务缓存 + RLS
+   - [supabase/migrations/0005_phase4_chat_images.sql](supabase/migrations/0005_phase4_chat_images.sql) — chat-attachments Storage 桶 (Phase 4)
+   - [supabase/migrations/0006_phase5_user_agents.sql](supabase/migrations/0006_phase5_user_agents.sql) — 自定义老师表 + RLS + 4 builtin seed (Phase 5)
+   - [supabase/migrations/0007_phase5_knowledge_notes.sql](supabase/migrations/0007_phase5_knowledge_notes.sql) — 知识点笔记 + chunks + match_knowledge_notes RPC (Phase 5)
+   - [supabase/migrations/0008_phase5_profile_extension.sql](supabase/migrations/0008_phase5_profile_extension.sql) — `learner_type` / `focus_domains` + grade nullable (Phase 5)
    - [supabase/seed.sql](supabase/seed.sql) — 数学/英语/语文三个学科种子
 4. 在项目根目录跑 `cd api && source .venv/bin/activate && python ../scripts/seed_knowledge_points.py` 入库知识点树
 5. (可选) `Authentication → Providers → Email` 中,本地开发可以关闭 "Confirm email" 让注册更顺;生产环境务必打开

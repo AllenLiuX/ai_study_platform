@@ -8,9 +8,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
+from .routes import agents as agents_route
 from .routes import chat as chat_route
 from .routes import health as health_route
 from .routes import materials as materials_route
+from .routes import notes as notes_route
 from .routes import students as students_route
 
 
@@ -43,6 +45,8 @@ def create_app() -> FastAPI:
     app.include_router(students_route.router, prefix="/api")
     app.include_router(chat_route.router, prefix="/api")
     app.include_router(materials_route.router, prefix="/api")
+    app.include_router(agents_route.router, prefix="/api")
+    app.include_router(notes_route.router, prefix="/api")
 
     return app
 

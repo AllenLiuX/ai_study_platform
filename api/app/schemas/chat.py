@@ -7,9 +7,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-AgentType = Literal[
-    "head_teacher", "math_teacher", "english_teacher", "chinese_teacher"
-]
+# Phase 5: agent_type 不再是固定 4 选 1,而是 user_agents.agent_key 的任意值
+# (内置老师 / 用户自定义老师 都走同一字段)
+AgentType = str
 
 
 class CreateSessionRequest(BaseModel):

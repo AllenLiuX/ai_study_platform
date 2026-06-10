@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AGENT_ORDER, AGENTS } from "@/lib/agents";
 import { studentApi } from "@/lib/api";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { Grade } from "@/lib/types";
+import type { Grade, LearnerType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const GRADES: Grade[] = ["初一", "初二", "初三", "高一", "高二", "高三"];
@@ -35,14 +35,32 @@ const TEXTBOOKS = [
 
 const TARGET_EXAMS = ["月考", "期中", "期末", "中考", "高考", "暂无明确考试"];
 
+const DOMAIN_PRESETS = [
+  "系统设计",
+  "算法",
+  "面试准备",
+  "量化交易",
+  "Agent / LLM",
+  "数据科学",
+  "编程进阶",
+  "学术研究",
+  "考公 / 留学",
+  "兴趣自学",
+];
+
 type Step = 0 | 1 | 2;
 
 interface FormState {
   name: string;
+  learner_type: LearnerType;
+  // K12 学生
   grade: Grade | "";
   textbook_version: string;
   target_exam: string;
   focus_subjects: string[];
+  // 自由学习者
+  focus_domains: string[];
+  // 共用
   learning_goal: string;
 }
 
@@ -53,10 +71,12 @@ export default function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>({
     name: "",
+    learner_type: "k12_student",
     grade: "",
     textbook_version: "人教版",
     target_exam: "期末",
     focus_subjects: ["math"],
+    focus_domains: [],
     learning_goal: "",
   });
 
@@ -77,6 +97,7 @@ export default function OnboardingPage() {
         setForm((prev) => ({
           ...prev,
           name: profile.name || meta.name || prev.name,
+          learner_type: profile.learner_type ?? prev.learner_type,
           grade: (profile.grade as Grade | null) || prev.grade,
           textbook_version: profile.textbook_version || prev.textbook_version,
           target_exam: profile.target_exam || prev.target_exam,
@@ -84,10 +105,13 @@ export default function OnboardingPage() {
             profile.focus_subjects && profile.focus_subjects.length > 0
               ? profile.focus_subjects
               : prev.focus_subjects,
+          focus_domains:
+            profile.focus_domains && profile.focus_domains.length > 0
+              ? profile.focus_domains
+              : prev.focus_domains,
           learning_goal: profile.learning_goal || prev.learning_goal,
         }));
       } catch {
-        // 如果后端未启动也不卡用户,继续填表
         if (!cancelled && meta.name) {
           setForm((prev) => ({ ...prev, name: prev.name || meta.name! }));
         }
@@ -98,11 +122,16 @@ export default function OnboardingPage() {
     };
   }, [router]);
 
+  const isK12 = form.learner_type === "k12_student";
+
   const canGoNext = useMemo(() => {
-    if (step === 0) return !!form.name && !!form.grade;
-    if (step === 1) return form.focus_subjects.length > 0;
-    return !!form.target_exam;
-  }, [step, form]);
+    if (step === 0) return !!form.name;
+    if (step === 1) {
+      if (isK12) return !!form.grade && form.focus_subjects.length > 0;
+      return form.focus_domains.length > 0 || form.learning_goal.trim().length >= 4;
+    }
+    return isK12 ? !!form.target_exam : true;
+  }, [step, form, isK12]);
 
   function toggleSubject(id: string) {
     setForm((prev) => ({
@@ -113,16 +142,27 @@ export default function OnboardingPage() {
     }));
   }
 
+  function toggleDomain(name: string) {
+    setForm((prev) => ({
+      ...prev,
+      focus_domains: prev.focus_domains.includes(name)
+        ? prev.focus_domains.filter((s) => s !== name)
+        : [...prev.focus_domains, name],
+    }));
+  }
+
   async function handleSubmit() {
     setSubmitting(true);
     setError(null);
     try {
       await studentApi.updateProfile({
         name: form.name,
-        grade: (form.grade || null) as Grade | null,
-        textbook_version: form.textbook_version,
-        target_exam: form.target_exam,
-        focus_subjects: form.focus_subjects,
+        learner_type: form.learner_type,
+        grade: isK12 ? ((form.grade || null) as Grade | null) : null,
+        textbook_version: isK12 ? form.textbook_version : null,
+        target_exam: isK12 ? form.target_exam : null,
+        focus_subjects: isK12 ? form.focus_subjects : [],
+        focus_domains: isK12 ? [] : form.focus_domains,
         learning_goal: form.learning_goal,
         onboarding_completed: true,
       });
@@ -160,9 +200,9 @@ export default function OnboardingPage() {
         {step === 0 && (
           <Card className="animate-fade-in">
             <CardHeader>
-              <CardTitle>第一步:你是谁?</CardTitle>
+              <CardTitle>第一步:你是谁?用平台学什么?</CardTitle>
               <CardDescription>
-                告诉我们你的昵称和年级,后续 AI 老师会根据这些信息因材施教。
+                两种模式 — K12 学生(语数外+学科辅导)与自由学习者(任意方向,可自定义老师)。
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -177,56 +217,105 @@ export default function OnboardingPage() {
                   placeholder="例如:小明"
                 />
               </div>
+
               <div className="space-y-2">
-                <Label>年级</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  {GRADES.map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => setForm((p) => ({ ...p, grade: g }))}
-                      className={cn(
-                        "rounded-xl border px-3 py-2.5 text-sm transition",
-                        form.grade === g
-                          ? "border-primary bg-primary/5 text-primary shadow-card"
-                          : "border-border hover:border-primary/40",
-                      )}
-                    >
-                      {g}
-                    </button>
-                  ))}
+                <Label>我想用平台:</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm((p) => ({ ...p, learner_type: "k12_student" }))
+                    }
+                    className={cn(
+                      "rounded-2xl border p-4 text-left transition",
+                      isK12
+                        ? "border-primary bg-primary/5 shadow-card"
+                        : "border-border hover:border-primary/40",
+                    )}
+                  >
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="text-xl">🎒</span>
+                      <span className="font-medium">K12 学科辅导</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      语数外为主,班主任 + 学科老师 + 进度沉淀
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm((p) => ({ ...p, learner_type: "free_learner" }))
+                    }
+                    className={cn(
+                      "rounded-2xl border p-4 text-left transition",
+                      !isK12
+                        ? "border-primary bg-primary/5 shadow-card"
+                        : "border-border hover:border-primary/40",
+                    )}
+                  >
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="text-xl">🚀</span>
+                      <span className="font-medium">自由学习</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      自定义老师 / 资料库 / 笔记,适合面试、转岗、自学新领域
+                    </p>
+                  </button>
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="textbook">教材版本</Label>
-                <Select
-                  id="textbook"
-                  value={form.textbook_version}
-                  onChange={(e) =>
-                    setForm((p) => ({
-                      ...p,
-                      textbook_version: e.target.value,
-                    }))
-                  }
-                >
-                  {TEXTBOOKS.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+
+              {isK12 && (
+                <>
+                  <div className="space-y-2">
+                    <Label>年级</Label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {GRADES.map((g) => (
+                        <button
+                          key={g}
+                          type="button"
+                          onClick={() => setForm((p) => ({ ...p, grade: g }))}
+                          className={cn(
+                            "rounded-xl border px-3 py-2.5 text-sm transition",
+                            form.grade === g
+                              ? "border-primary bg-primary/5 text-primary shadow-card"
+                              : "border-border hover:border-primary/40",
+                          )}
+                        >
+                          {g}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="textbook">教材版本</Label>
+                    <Select
+                      id="textbook"
+                      value={form.textbook_version}
+                      onChange={(e) =>
+                        setForm((p) => ({
+                          ...p,
+                          textbook_version: e.target.value,
+                        }))
+                      }
+                    >
+                      {TEXTBOOKS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         )}
 
-        {step === 1 && (
+        {step === 1 && isK12 && (
           <Card className="animate-fade-in">
             <CardHeader>
               <CardTitle>第二步:最想提升哪几科?</CardTitle>
-              <CardDescription>
-                可以多选。Phase 0 我们先聚焦数学、英语、语文三科。
-              </CardDescription>
+              <CardDescription>可以多选。先聚焦 1-3 科,效果更明显。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {AGENT_ORDER.filter((t) => AGENTS[t].subjectId).map((type) => {
@@ -276,39 +365,94 @@ export default function OnboardingPage() {
           </Card>
         )}
 
-        {step === 2 && (
+        {step === 1 && !isK12 && (
           <Card className="animate-fade-in">
             <CardHeader>
-              <CardTitle>第三步:近期目标</CardTitle>
+              <CardTitle>第二步:你想专攻什么方向?</CardTitle>
               <CardDescription>
-                设一个具体一点的目标,AI 班主任会基于它给你安排节奏。
+                选几个感兴趣的方向(可多选,也可在「目标」里自由描述)。后续可以为每个方向创建专属老师。
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>临近的考试</Label>
-                <div className="grid grid-cols-3 gap-2">
-                  {TARGET_EXAMS.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() =>
-                        setForm((p) => ({ ...p, target_exam: t }))
-                      }
-                      className={cn(
-                        "rounded-xl border px-3 py-2.5 text-sm transition",
-                        form.target_exam === t
-                          ? "border-primary bg-primary/5 text-primary shadow-card"
-                          : "border-border hover:border-primary/40",
-                      )}
-                    >
-                      {t}
-                    </button>
-                  ))}
+                <Label>方向 tags (任意组合,后续可改)</Label>
+                <div className="flex flex-wrap gap-2">
+                  {DOMAIN_PRESETS.map((d) => {
+                    const selected = form.focus_domains.includes(d);
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => toggleDomain(d)}
+                        className={cn(
+                          "rounded-full border px-3 py-1.5 text-sm transition",
+                          selected
+                            ? "border-primary bg-primary/5 text-primary"
+                            : "border-border hover:border-primary/40",
+                        )}
+                      >
+                        {selected ? "✓ " : ""}
+                        {d}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="goal">学习目标 (可选)</Label>
+                <Label htmlFor="goal-free">学习目标 (具体一点效果更好)</Label>
+                <Textarea
+                  id="goal-free"
+                  rows={4}
+                  value={form.learning_goal}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, learning_goal: e.target.value }))
+                  }
+                  placeholder="例如:面试顶级量化公司 AI Lab Senior ML Engineer 职位,想系统补齐算法系统设计 / Agent 框架 / 事件驱动量化系统 / 期权交易系统设计"
+                />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {step === 2 && (
+          <Card className="animate-fade-in">
+            <CardHeader>
+              <CardTitle>
+                {isK12 ? "第三步:近期目标" : "第三步:确认一下学习目标"}
+              </CardTitle>
+              <CardDescription>
+                {isK12
+                  ? "设一个具体一点的目标,AI 班主任会基于它给你安排节奏。"
+                  : "目标越具体,AI 老师就越容易帮你拆解路径。可以再补充一些细节。"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {isK12 && (
+                <div className="space-y-2">
+                  <Label>临近的考试</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TARGET_EXAMS.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() =>
+                          setForm((p) => ({ ...p, target_exam: t }))
+                        }
+                        className={cn(
+                          "rounded-xl border px-3 py-2.5 text-sm transition",
+                          form.target_exam === t
+                            ? "border-primary bg-primary/5 text-primary shadow-card"
+                            : "border-border hover:border-primary/40",
+                        )}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="goal">学习目标 {isK12 && "(可选)"}</Label>
                 <Textarea
                   id="goal"
                   rows={4}
@@ -316,7 +460,11 @@ export default function OnboardingPage() {
                   onChange={(e) =>
                     setForm((p) => ({ ...p, learning_goal: e.target.value }))
                   }
-                  placeholder="例如:期末数学想从 75 提到 90;英语作文想能稳定写 70+"
+                  placeholder={
+                    isK12
+                      ? "例如:期末数学想从 75 提到 90;英语作文想能稳定写 70+"
+                      : "例如:8 周内能从容应对系统设计面试,能讲清楚一套事件驱动量化系统的核心组件"
+                  }
                 />
               </div>
             </CardContent>

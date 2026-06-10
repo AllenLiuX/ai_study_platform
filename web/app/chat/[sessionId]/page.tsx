@@ -12,7 +12,7 @@ import { MaterialPicker } from "@/components/MaterialPicker";
 import { ModelSelector } from "@/components/ModelSelector";
 import { StudentProfilePanel } from "@/components/StudentProfilePanel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AGENTS } from "@/lib/agents";
+import { resolveAgentMeta } from "@/lib/agents";
 import {
   chatApi,
   materialsApi,
@@ -20,6 +20,7 @@ import {
   sendMessageStream,
   studentApi,
 } from "@/lib/api";
+import { useAgents } from "@/lib/hooks/useAgents";
 import type {
   AgentType,
   ChatMessage,
@@ -71,7 +72,11 @@ export default function ChatSessionPage() {
   );
   const agentType: AgentType = (session?.agent_type ??
     "head_teacher") as AgentType;
-  const agent = AGENTS[agentType];
+  const agentsQuery = useAgents();
+  const agent = useMemo(
+    () => resolveAgentMeta(agentType, agentsQuery.data),
+    [agentType, agentsQuery.data],
+  );
 
   const [streamingText, setStreamingText] = useState("");
   const [streamingCitations, setStreamingCitations] = useState<Citation[]>([]);
@@ -81,6 +86,21 @@ export default function ChatSessionPage() {
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Phase 5: 老师有 default_material_ids 时,进入对话默认勾上
+  // 当 dynamic agent data 第一次出现(且未手动改过)时填充
+  const materialsInitRef = useRef(false);
+  useEffect(() => {
+    if (materialsInitRef.current) return;
+    if (!agent.defaultMaterialIds) return;
+    if (agent.defaultMaterialIds.length === 0) return;
+    if (selectedMaterialIds.length > 0) {
+      materialsInitRef.current = true;
+      return;
+    }
+    setSelectedMaterialIds([...agent.defaultMaterialIds]);
+    materialsInitRef.current = true;
+  }, [agent.defaultMaterialIds, selectedMaterialIds.length]);
 
   // Phase 3.5: 模型档位 — 按 agent type 记忆到 localStorage,跨 session 也保留
   const [selectedTier, setSelectedTier] = useState<ModelTierId | null>(null);

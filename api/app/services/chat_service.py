@@ -10,14 +10,14 @@ from typing import AsyncIterator
 
 from fastapi import BackgroundTasks, HTTPException, status
 
-from ..agents.registry import AgentConfig, get_agent
+from ..agents.registry import AgentConfig, resolve_agent
 from ..agents.runtime import stream_reply
 from ..core.llm import ModelTier, resolve_model
 from ..db import repos
 from ..db.supabase_client import get_admin_client
 from ..schemas.chat import CreateSessionRequest
 from .progress_extractor import extract_and_update
-from .retrieval import RetrievedChunk, format_context, retrieve_chunks
+from .retrieval import RetrievedChunk, format_context, retrieve_for_chat
 from .suggester import suggest_follow_ups
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ def _default_session_title(agent: AgentConfig) -> str:
 
 def create_chat_session(*, user_id: str, payload: CreateSessionRequest) -> dict:
     try:
-        agent = get_agent(payload.agent_type)
+        agent = resolve_agent(payload.agent_type, owner_id=user_id)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -130,16 +130,30 @@ def list_sessions(user_id: str) -> list[dict]:
 
 
 def _citation_payload(chunks: list[RetrievedChunk]) -> list[dict]:
-    return [
-        {
-            "material_id": c.material_id,
-            "material_title": c.material_title,
+    """前端可消费的引用条目。
+
+    Phase 5: 同时含 material / note 两种来源,前端 ChatWindow 用 `source` 区分图标。
+    保留 material_id / material_title 旧字段以兼容老消息渲染。
+    """
+    out: list[dict] = []
+    for c in chunks:
+        item = {
+            "source": c.source,  # "material" | "note"
+            "source_id": c.source_id,
+            "source_title": c.source_title,
             "chunk_index": c.chunk_index,
             "similarity": round(c.similarity, 4),
             "snippet": c.content[:160],
         }
-        for c in chunks
-    ]
+        # 旧字段兼容
+        if c.source == "material":
+            item["material_id"] = c.source_id
+            item["material_title"] = c.source_title
+        else:
+            item["note_id"] = c.source_id
+            item["note_title"] = c.source_title
+        out.append(item)
+    return out
 
 
 async def stream_assistant_reply(
@@ -166,7 +180,7 @@ async def stream_assistant_reply(
     6. 累计完整文本后落库 assistant message,citations 写入 metadata
     """
     session = get_session_or_404(session_id, user_id)
-    agent = get_agent(session["agent_type"])
+    agent = resolve_agent(session["agent_type"], owner_id=user_id)
 
     user_meta: dict = {}
     if material_ids:
@@ -210,34 +224,44 @@ async def stream_assistant_reply(
                 "agent_type": agent.agent_type,
                 "model": model_name,
                 "model_tier": effective_tier.value,
+                "agent": {
+                    "agent_key": agent.agent_type,
+                    "display_name": agent.display_name,
+                    "emoji": agent.emoji,
+                    "owner_type": agent.owner_type,
+                    "default_material_ids": list(agent.default_material_ids),
+                },
             },
         )
 
         rag_context: str | None = None
-        if material_ids is not None and len(material_ids) > 0:
-            try:
-                citations = await retrieve_chunks(
-                    query=user_content,
-                    owner_id=user_id,
-                    material_ids=material_ids,
-                    top_k=5,
-                )
-            except Exception as exc:
-                logger.warning("RAG retrieval failed: %s", exc)
-                yield _sse(
-                    "warning",
-                    {"message": f"资料检索失败,本次将基于通识知识回答 ({exc})"},
-                )
-                citations = []
+        # Phase 5: 总是尝试召回笔记 (用户私有 KP);material_ids 显式空时仍只走笔记
+        has_materials = material_ids is not None and len(material_ids) > 0
+        try:
+            citations = await retrieve_for_chat(
+                query=user_content,
+                owner_id=user_id,
+                material_ids=material_ids if has_materials else None,
+                include_notes=True,
+                top_k_materials=5,
+                top_k_notes=3,
+            )
+        except Exception as exc:
+            logger.warning("RAG retrieval failed: %s", exc)
+            yield _sse(
+                "warning",
+                {"message": f"资料/笔记检索失败,本次将基于通识知识回答 ({exc})"},
+            )
+            citations = []
 
-            if citations:
-                rag_context = format_context(citations)
-                yield _sse("citations", {"items": _citation_payload(citations)})
-            else:
-                yield _sse(
-                    "warning",
-                    {"message": "未在选中的资料里找到与问题相关的内容,本次将基于通识知识回答"},
-                )
+        if citations:
+            rag_context = format_context(citations)
+            yield _sse("citations", {"items": _citation_payload(citations)})
+        elif has_materials:
+            yield _sse(
+                "warning",
+                {"message": "未在选中的资料/笔记里找到与问题相关的内容,本次将基于通识知识回答"},
+            )
 
         async for delta in stream_reply(
             agent=agent,

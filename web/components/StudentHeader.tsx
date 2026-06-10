@@ -34,13 +34,24 @@ export function StudentHeader({ profile, modelStack }: StudentHeaderProps) {
             {profile.name || "同学"},准备好今天的学习了吗?
           </h1>
           <div className="flex flex-wrap items-center gap-2">
-            {profile.grade && <Badge variant="default">{profile.grade}</Badge>}
-            {profile.textbook_version && (
-              <Badge variant="secondary">{profile.textbook_version}</Badge>
+            {profile.learner_type === "free_learner" ? (
+              <Badge variant="default">自由学习者</Badge>
+            ) : (
+              <>
+                {profile.grade && <Badge variant="default">{profile.grade}</Badge>}
+                {profile.textbook_version && (
+                  <Badge variant="secondary">{profile.textbook_version}</Badge>
+                )}
+                {profile.target_exam && (
+                  <Badge variant="secondary">目标 · {profile.target_exam}</Badge>
+                )}
+              </>
             )}
-            {profile.target_exam && (
-              <Badge variant="secondary">目标 · {profile.target_exam}</Badge>
-            )}
+            {(profile.focus_domains ?? []).slice(0, 4).map((d) => (
+              <Badge key={d} variant="secondary">
+                {d}
+              </Badge>
+            ))}
           </div>
           {profile.learning_goal && (
             <p className="max-w-xl text-sm text-muted-foreground">

@@ -4,7 +4,7 @@ import { ArrowUpRight, MessagesSquare } from "lucide-react";
 import Link from "next/link";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AGENTS } from "@/lib/agents";
+import { getAgentMeta } from "@/lib/agents";
 import type { ChatSession } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +47,7 @@ export function RecentSessionsCard({
         ) : (
           <ul className="space-y-1">
             {sessions.map((s) => {
-              const agent = AGENTS[s.agent_type];
+              const agent = getAgentMeta(s.agent_type);
               return (
                 <li key={s.id}>
                   <Link

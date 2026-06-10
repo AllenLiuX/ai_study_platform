@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  GraduationCap,
   Library,
   Loader2,
   LogOut,
   MessageSquare,
+  Notebook,
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
@@ -21,8 +23,10 @@ interface AppHeaderProps {
 }
 
 const NAV_LINKS = [
-  { href: "/dashboard", label: "学习驾驶舱" },
+  { href: "/dashboard", label: "驾驶舱" },
+  { href: "/agents", label: "老师", icon: GraduationCap },
   { href: "/materials", label: "资料库", icon: Library },
+  { href: "/notes", label: "笔记", icon: Notebook },
 ] as const;
 
 export function AppHeader({ className }: AppHeaderProps) {
@@ -57,7 +61,14 @@ export function AppHeader({ className }: AppHeaderProps) {
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-foreground text-background">
               <Sparkles className="h-5 w-5" />
             </span>
-            <span className="font-semibold tracking-tight">学习驾驶舱</span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-[15px] font-semibold tracking-tight">
+                AI 自适应学习平台
+              </span>
+              <span className="hidden text-[11px] text-muted-foreground sm:inline">
+                Your adaptive AI tutor
+              </span>
+            </div>
           </Link>
           <nav className="hidden items-center gap-1 sm:flex">
             {NAV_LINKS.map((link) => {

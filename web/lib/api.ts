@@ -5,15 +5,22 @@ import type {
   ChatMessage,
   ChatSession,
   Citation,
+  CreateNoteRequest,
+  CreateUserAgentRequest,
   DailyTasksResponse,
   DashboardResponse,
   FollowUp,
+  GeneratedAgentSpec,
+  KnowledgeNote,
   Material,
   MaterialType,
   ModelTierId,
   ModelTierInfo,
   StudentProfile,
   Subject,
+  UpdateNoteRequest,
+  UpdateUserAgentRequest,
+  UserAgent,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -252,6 +259,73 @@ export const materialsApi = {
     }
     return (await resp.json()) as Material;
   },
+};
+
+// -----------------------------------------------------------------------------
+// Agents (Phase 5: 自定义老师)
+// -----------------------------------------------------------------------------
+export const agentsApi = {
+  list: () => request<UserAgent[]>("/api/agents"),
+  get: (agentKey: string) => request<UserAgent>(`/api/agents/${agentKey}`),
+  create: (payload: CreateUserAgentRequest) =>
+    request<UserAgent>("/api/agents", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  update: (agentKey: string, payload: UpdateUserAgentRequest) =>
+    request<UserAgent>(`/api/agents/${agentKey}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  delete: (agentKey: string) =>
+    request<void>(`/api/agents/${agentKey}`, { method: "DELETE" }),
+  /** 让 LLM 根据自然语言描述帮我生成老师配置 (Phase 5 创建表单的"AI 帮我生成"按钮) */
+  generateSpec: (description: string, domains: string[] = []) =>
+    request<GeneratedAgentSpec>("/api/agents/_generate", {
+      method: "POST",
+      body: JSON.stringify({ description, domains }),
+      timeoutMs: 60_000, // LLM 生成可能较慢
+    }),
+};
+
+// -----------------------------------------------------------------------------
+// Notes (Phase 5: 笔记 = 私有知识点)
+// -----------------------------------------------------------------------------
+export const notesApi = {
+  list: (opts: { agent_key?: string; tag?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.agent_key) params.set("agent_key", opts.agent_key);
+    if (opts.tag) params.set("tag", opts.tag);
+    const qs = params.toString();
+    return request<KnowledgeNote[]>(`/api/notes${qs ? `?${qs}` : ""}`);
+  },
+  get: (id: string) => request<KnowledgeNote>(`/api/notes/${id}`),
+  create: (payload: CreateNoteRequest) =>
+    request<KnowledgeNote>("/api/notes", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  /** Phase 5: 从 chat assistant 消息蒸馏笔记 (LLM 提取) */
+  createFromMessage: (
+    payload: { message_id: string; parent_id?: string | null; tags?: string[] | null },
+  ) =>
+    request<KnowledgeNote>("/api/notes/from_message", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 45_000,
+    }),
+  update: (id: string, payload: UpdateNoteRequest) =>
+    request<KnowledgeNote>(`/api/notes/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  delete: (id: string) =>
+    request<void>(`/api/notes/${id}`, { method: "DELETE" }),
+  review: (id: string, score: number) =>
+    request<KnowledgeNote>(`/api/notes/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify({ score }),
+    }),
 };
 
 // -----------------------------------------------------------------------------

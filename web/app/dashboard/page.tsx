@@ -15,7 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AGENTS, AGENT_ORDER } from "@/lib/agents";
 import { chatApi, metaApi, studentApi } from "@/lib/api";
+import { useAgents } from "@/lib/hooks/useAgents";
 import type { AgentType, ChatSession, DailyTask } from "@/lib/types";
+import Link from "next/link";
+import { ArrowRight, GraduationCap, Notebook } from "lucide-react";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -24,6 +27,7 @@ export default function DashboardPage() {
     queryKey: ["dashboard"],
     queryFn: studentApi.getDashboard,
   });
+  const agentsQuery = useAgents();
 
   const configQuery = useQuery({
     queryKey: ["meta-config"],
@@ -95,11 +99,11 @@ export default function DashboardPage() {
   }
 
   function enterAgent(type: AgentType) {
-    const agent = AGENTS[type];
+    const agent = AGENTS[type as keyof typeof AGENTS];
     void openSession(`agent:${type}`, async () => {
       const session = await chatApi.createSession({
         agent_type: type,
-        subject_id: agent.subjectId,
+        subject_id: agent?.subjectId ?? null,
       });
       return { session };
     });
@@ -207,39 +211,57 @@ export default function DashboardPage() {
               </div>
             </section>
 
-            <section className="space-y-3">
-              <SectionTitle title="班主任" />
-              <HeadTeacherCard
-                onEnter={() => enterAgent("head_teacher")}
-                modelLabel={models?.default}
-                busy={creatingKey === "agent:head_teacher"}
+            {dashboardQuery.data.profile.learner_type === "free_learner" ? (
+              <FreeLearnerSection
+                agentsCount={
+                  (agentsQuery.data ?? []).filter(
+                    (a) => a.owner_type === "user" && a.is_active,
+                  ).length
+                }
+                onEnter={(key: string) => enterAgent(key as AgentType)}
+                creatingKey={creatingKey}
+                modelDefault={models?.default}
               />
-            </section>
+            ) : (
+              <>
+                <section className="space-y-3">
+                  <SectionTitle title="班主任" />
+                  <HeadTeacherCard
+                    onEnter={() => enterAgent("head_teacher")}
+                    modelLabel={models?.default}
+                    busy={creatingKey === "agent:head_teacher"}
+                  />
+                </section>
 
-            <section className="space-y-3">
-              <SectionTitle
-                title="各科学习进度"
-                hint="由 AI 在每次对话后自动抽取知识点 + 掌握度"
-              />
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {AGENT_ORDER.filter((t) => AGENTS[t].subjectId).map((type) => {
-                  const agent = AGENTS[type];
-                  const progress = dashboardQuery.data?.progress?.find(
-                    (p) => p.subject_id === agent.subjectId,
-                  );
-                  return (
-                    <SubjectProgressCard
-                      key={type}
-                      agent={agent}
-                      progress={progress}
-                      modelLabel={models?.default}
-                      onEnter={() => enterAgent(type)}
-                      busy={creatingKey === `agent:${type}`}
-                    />
-                  );
-                })}
-              </div>
-            </section>
+                <section className="space-y-3">
+                  <SectionTitle
+                    title="各科学习进度"
+                    hint="由 AI 在每次对话后自动抽取知识点 + 掌握度"
+                  />
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {AGENT_ORDER.filter((t) => AGENTS[t].subjectId).map(
+                      (type) => {
+                        const agent = AGENTS[type];
+                        const progress =
+                          dashboardQuery.data?.progress?.find(
+                            (p) => p.subject_id === agent.subjectId,
+                          );
+                        return (
+                          <SubjectProgressCard
+                            key={type}
+                            agent={agent}
+                            progress={progress}
+                            modelLabel={models?.default}
+                            onEnter={() => enterAgent(type)}
+                            busy={creatingKey === `agent:${type}`}
+                          />
+                        );
+                      },
+                    )}
+                  </div>
+                </section>
+              </>
+            )}
 
             <section>
               <RecentSessionsCard
@@ -258,6 +280,80 @@ function SectionTitle({ title, hint }: { title: string; hint?: string }) {
     <div className="flex flex-wrap items-baseline justify-between gap-2">
       <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
       {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+    </div>
+  );
+}
+
+function FreeLearnerSection({
+  agentsCount,
+  onEnter,
+  creatingKey,
+  modelDefault,
+}: {
+  agentsCount: number;
+  onEnter: (key: string) => void;
+  creatingKey: string | null;
+  modelDefault?: string;
+}) {
+  return (
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <SectionTitle
+          title="我的 AI 老师团"
+          hint="为不同方向各配一位专属老师,每位老师可挂自己的资料库"
+        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <HeadTeacherCard
+            onEnter={() => onEnter("head_teacher")}
+            modelLabel={modelDefault}
+            busy={creatingKey === "agent:head_teacher"}
+          />
+          <Link
+            href="/agents"
+            className="group flex flex-col justify-between rounded-3xl border border-dashed border-border bg-card/40 p-6 transition hover:border-primary/40"
+          >
+            <div>
+              <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+                <GraduationCap className="h-3 w-3" />
+                自定义老师 · {agentsCount}
+              </div>
+              <h3 className="text-lg font-semibold tracking-tight">
+                + 创建 / 管理你的专属老师
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                为面试、转岗、自学新领域各配一位 AI 老师 — 自定义角色、
+                绑定资料库、AI 帮你生成 system prompt。
+              </p>
+            </div>
+            <div className="mt-4 inline-flex items-center gap-1 text-sm text-primary">
+              进入老师管理
+              <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+            </div>
+          </Link>
+        </div>
+      </section>
+
+      <section>
+        <Link
+          href="/notes"
+          className="group flex items-center justify-between rounded-2xl border border-border bg-card p-4 shadow-card transition hover:border-primary/40"
+        >
+          <div>
+            <div className="mb-1 inline-flex items-center gap-1.5 text-xs font-medium text-primary">
+              <Notebook className="h-3.5 w-3.5" />
+              知识点笔记
+            </div>
+            <div className="text-sm font-medium">
+              在对话中沉淀知识点,自动参与 RAG 召回
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              每条 AI 回答下点「保存为笔记」,AI 会蒸馏成结构化 markdown,
+              下次再聊到这块自动召回。
+            </div>
+          </div>
+          <ArrowRight className="h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5" />
+        </Link>
+      </section>
     </div>
   );
 }

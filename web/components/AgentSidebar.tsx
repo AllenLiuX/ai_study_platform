@@ -4,7 +4,7 @@ import { MessageCircle, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { AGENTS, AGENT_ORDER } from "@/lib/agents";
+import { AGENTS, AGENT_ORDER, getAgentMeta } from "@/lib/agents";
 import { chatApi } from "@/lib/api";
 import type { AgentType, ChatSession } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -26,10 +26,10 @@ export function AgentSidebar({
 
   async function startNew(type: AgentType) {
     try {
-      const agent = AGENTS[type];
+      const agent = AGENTS[type as keyof typeof AGENTS];
       const session = await chatApi.createSession({
         agent_type: type,
-        subject_id: agent.subjectId,
+        subject_id: agent?.subjectId ?? null,
       });
       router.push(`/chat/${session.id}`);
       router.refresh();
@@ -97,7 +97,7 @@ export function AgentSidebar({
         ) : (
           <ul className="space-y-1">
             {sessions.map((s) => {
-              const agent = AGENTS[s.agent_type];
+              const agent = getAgentMeta(s.agent_type);
               const isActive = s.id === currentSessionId;
               return (
                 <li key={s.id}>
@@ -132,7 +132,7 @@ export function AgentSidebar({
         className="inline-flex h-10 w-full items-center justify-start gap-2 rounded-xl border border-border bg-transparent px-4 text-sm font-medium transition hover:bg-secondary"
       >
         <MessageCircle className="h-4 w-4" />
-        回到学习驾驶舱
+        回到驾驶舱
       </Link>
     </aside>
   );
