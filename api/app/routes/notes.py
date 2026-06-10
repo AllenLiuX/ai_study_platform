@@ -11,6 +11,7 @@ from ..db import repos
 from ..schemas.note import (
     CreateNoteRequest,
     GenerateNoteFromMessageRequest,
+    GenerateNoteFromSessionRequest,
     KnowledgeNote,
     ReviewNoteRequest,
     UpdateNoteRequest,
@@ -102,6 +103,23 @@ async def create_note_from_message(
     row = await notes_service.generate_note_from_message(
         owner_id=user.id,
         message_id=payload.message_id,
+        parent_id=payload.parent_id,
+        tags_override=payload.tags,
+    )
+    background_tasks.add_task(notes_indexer.process_note, row["id"])
+    return _to_note(row)
+
+
+@router.post("/from_session", response_model=KnowledgeNote, status_code=201)
+async def create_note_from_session(
+    payload: GenerateNoteFromSessionRequest,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser = Depends(get_current_user),
+) -> KnowledgeNote:
+    """把整段对话蒸馏成一份汇总笔记 (整段 transcript + 累计 citations 喂给 LLM)。"""
+    row = await notes_service.generate_note_from_session(
+        owner_id=user.id,
+        session_id=payload.session_id,
         parent_id=payload.parent_id,
         tags_override=payload.tags,
     )

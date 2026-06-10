@@ -35,6 +35,41 @@ _NOTE_SYSTEM = """你是一个 AI 学习平台的"笔记提取助手"。
 严格输出 JSON,不要 markdown 代码块包裹。字段:title / summary / content / tags / insufficient (bool) / insufficient_reason?
 """
 
+_NOTE_FROM_SESSION_SYSTEM = """你是一个 AI 学习平台的"对话汇总助手"。
+学生跟一位老师进行了完整的一段对话 (可能涵盖 1 个核心主题 + 若干相关知识点)。
+你要把这整段对话蒸馏成一份"可复用的汇总笔记"。
+
+规则:
+- title 体现整段对话的核心学习主题 (不是过程),例如:"动态规划入门:子问题与记忆化"、
+  "事件驱动量化系统设计要点";如果对话明显是多个独立小主题,可以用一个总括 title
+- summary 一句话 (≤ 50 字) 浓缩学生这次学到了什么
+- content 是 markdown 正文,要按"知识点 / 主题"分层级组织,推荐结构:
+    ## 主题 1 标题
+    - 概念 / 定义
+    - 关键性质 / 推导
+    - 易错点 / 实例
+
+    ## 主题 2 标题
+    ...
+
+    ## 学到的核心结论
+    - 关键 take-away 1
+    - 关键 take-away 2
+
+  正文长度 ≤ 3000 字,可以含 LaTeX ($...$ / $$...$$)。不要照搬对话原文 — 要重新组织、提炼。
+- 如果对话出现了多个参考资料(网页 / 上传资料 / 已有笔记),在 markdown 末尾加一段
+  `## 参考资料` 列出最相关的 3-8 条;带 URL 的写成 markdown 链接
+- tags 给 3-8 个标签 (覆盖本次对话讨论的所有领域)
+- 如果对话信息不足以形成有意义的笔记 (例如只是几句闲聊 / 学生还没真正开始问),设 insufficient=true
+
+严格输出 JSON,不要 markdown 代码块包裹。字段:title / summary / content / tags / insufficient (bool) / insufficient_reason?
+"""
+
+# 限制喂给 LLM 的 transcript 总长度 (按字符近似),避免单次 session 太长爆 context
+_SESSION_TRANSCRIPT_MAX_CHARS = 12_000
+# 单条消息最长字符 — 截断后保留头 + 尾
+_PER_MSG_MAX_CHARS = 1_500
+
 
 def _safe_load_json(text: str) -> dict[str, Any]:
     text = text.strip()
@@ -184,6 +219,200 @@ async def generate_note_from_message(
         "agent_key": agent_key,
         "origin_session_id": session_id,
         "origin_message_id": message_id,
+        "title": title,
+        "summary": summary or None,
+        "content": content,
+        "tags": tags,
+        "parent_id": parent_id,
+        "source": "chat",
+        "chunk_status": "pending",
+    }
+    return repos.insert_note(payload)
+
+
+# =============================================================================
+# 整段对话 → 一份汇总笔记 (复用同一 LLM 蒸馏管线,system prompt 不同)
+# =============================================================================
+
+
+def _truncate_middle(text: str, max_chars: int = _PER_MSG_MAX_CHARS) -> str:
+    """单条消息超长时,保留头部 + 尾部,中段省略 — 既给上下文也给结论。"""
+    if len(text) <= max_chars:
+        return text
+    keep = max_chars // 2 - 20
+    return f"{text[:keep]}\n\n... [中段省略 {len(text) - 2 * keep} 字] ...\n\n{text[-keep:]}"
+
+
+def _build_session_transcript(messages: list[dict]) -> tuple[str, list[dict]]:
+    """把 session 的所有有效消息拼成 transcript + 收集所有 citations 去重。
+
+    过滤:
+      - role=system / kind=welcome (内置欢迎语) — 不算讨论内容
+      - 内容为空的消息
+    """
+    seen_cite_keys: set[str] = set()
+    aggregated_citations: list[dict] = []
+    turns: list[str] = []
+    user_idx = assistant_idx = 0
+
+    for msg in messages:
+        role = msg.get("role")
+        meta = msg.get("metadata") or {}
+        if role == "system":
+            continue
+        if meta.get("kind") == "welcome":
+            continue
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+
+        if role == "user":
+            user_idx += 1
+            turns.append(
+                f"## 学生 (轮 {user_idx})\n{_truncate_middle(content)}"
+            )
+        elif role == "assistant":
+            assistant_idx += 1
+            turns.append(
+                f"## 老师 (轮 {assistant_idx})\n{_truncate_middle(content)}"
+            )
+            # 聚合 citations
+            for c in (meta.get("citations") or []):
+                key = (
+                    c.get("url")
+                    or c.get("source_id")
+                    or c.get("material_id")
+                    or c.get("note_id")
+                    or (c.get("source"), c.get("source_title"))
+                )
+                if not key or key in seen_cite_keys:
+                    continue
+                seen_cite_keys.add(key)
+                aggregated_citations.append(c)
+
+    transcript = "\n\n".join(turns)
+    # 整体二次截断 — 头尾各占一半,保留学习开始 + 学习结论
+    if len(transcript) > _SESSION_TRANSCRIPT_MAX_CHARS:
+        keep = _SESSION_TRANSCRIPT_MAX_CHARS // 2 - 50
+        transcript = (
+            f"{transcript[:keep]}\n\n"
+            f"... [整段对话中段省略 {len(transcript) - 2 * keep} 字,以保留首尾上下文] ...\n\n"
+            f"{transcript[-keep:]}"
+        )
+
+    return transcript, aggregated_citations
+
+
+def _citations_block(citations: list[dict], *, limit: int = 10) -> str:
+    """把聚合的 citations 拼成 markdown 段,塞进 transcript 末尾让 LLM 看到。"""
+    if not citations:
+        return ""
+    lines: list[str] = []
+    for i, c in enumerate(citations[:limit], start=1):
+        src = c.get("source") or "material"
+        title = (
+            c.get("source_title")
+            or c.get("material_title")
+            or c.get("note_title")
+            or "(无标题)"
+        )
+        if src == "web":
+            url = c.get("url") or c.get("source_id") or ""
+            line = f"{i}. [{src}] [{title}]({url})" if url else f"{i}. [{src}] {title}"
+        else:
+            line = f"{i}. [{src}] {title}"
+        lines.append(line)
+    return "\n\n# 参考资料 (整段对话累计引用)\n" + "\n".join(lines)
+
+
+async def generate_note_from_session(
+    *,
+    owner_id: str,
+    session_id: str,
+    parent_id: str | None = None,
+    tags_override: list[str] | None = None,
+) -> dict:
+    """把整段对话蒸馏为一份汇总笔记。
+
+    步骤:
+    1. 拉 session 全消息,过滤 welcome / system
+    2. 拼 user / assistant 交替的 transcript + 聚合所有 citations
+    3. LLM (MEDIUM tier) 输出 title / summary / content / tags
+    4. 落 knowledge_notes 行 (origin_message_id = 最后一条 assistant)
+    """
+    session = repos.get_session(session_id, owner_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="对话不存在或无权访问")
+
+    messages = repos.list_messages(session_id)
+    if not messages:
+        raise HTTPException(status_code=422, detail="该对话还没有任何消息")
+
+    transcript, citations = _build_session_transcript(messages)
+    if not transcript.strip():
+        raise HTTPException(
+            status_code=422, detail="对话内容为空,无法蒸馏笔记"
+        )
+
+    # 计算 origin_message_id = 最后一条 assistant message (供前端回溯)
+    last_assistant_id: str | None = None
+    for msg in reversed(messages):
+        if msg.get("role") == "assistant" and (msg.get("content") or "").strip():
+            last_assistant_id = msg.get("id")
+            break
+
+    full_input = transcript + _citations_block(citations)
+
+    client = get_client()
+    model = resolve_model(ModelTier.MEDIUM)
+    try:
+        resp = await client.chat.completions.create(
+            **build_chat_kwargs(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _NOTE_FROM_SESSION_SYSTEM},
+                    {"role": "user", "content": full_input},
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"},
+            ),
+        )
+    except OpenAIAPIError as exc:
+        logger.warning("generate note from session llm failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"LLM 调用失败: {exc}") from exc
+
+    text = (resp.choices[0].message.content or "").strip()
+    try:
+        data = _safe_load_json(text)
+    except Exception as exc:
+        logger.warning("session note llm bad json: %s\n%s", exc, text[:500])
+        raise HTTPException(status_code=502, detail="LLM 输出格式异常,请重试") from exc
+
+    if data.get("insufficient"):
+        raise HTTPException(
+            status_code=422,
+            detail=data.get("insufficient_reason") or "对话信息不足以形成笔记",
+        )
+
+    title = str(data.get("title") or "").strip()[:200]
+    summary = str(data.get("summary") or "").strip()[:500]
+    content = str(data.get("content") or "").strip()
+    if not title or not content:
+        raise HTTPException(status_code=502, detail="LLM 输出缺少 title / content")
+
+    tags = tags_override
+    if tags is None:
+        tags = [
+            str(t).strip()
+            for t in (data.get("tags") or [])
+            if str(t).strip()
+        ][:20]
+
+    payload = {
+        "owner_id": owner_id,
+        "agent_key": session.get("agent_type"),
+        "origin_session_id": session_id,
+        "origin_message_id": last_assistant_id,
         "title": title,
         "summary": summary or None,
         "content": content,

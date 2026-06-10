@@ -43,6 +43,14 @@ class GenerateNoteFromMessageRequest(BaseModel):
     tags: list[str] | None = None
 
 
+class GenerateNoteFromSessionRequest(BaseModel):
+    """从整段对话蒸馏笔记 (一键整理整个 session)。"""
+
+    session_id: str  # chat_sessions.id
+    parent_id: str | None = None
+    tags: list[str] | None = None
+
+
 class CreateNoteRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     content: str = Field(..., min_length=1, max_length=20000)

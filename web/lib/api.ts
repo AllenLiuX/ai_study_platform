@@ -320,6 +320,15 @@ export const notesApi = {
       body: JSON.stringify(payload),
       timeoutMs: 45_000,
     }),
+  /** Phase 5: 把整段对话蒸馏成一份汇总笔记 */
+  createFromSession: (
+    payload: { session_id: string; parent_id?: string | null; tags?: string[] | null },
+  ) =>
+    request<KnowledgeNote>("/api/notes/from_session", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 90_000, // 整段 session 可能更长,放宽超时
+    }),
   update: (id: string, payload: UpdateNoteRequest) =>
     request<KnowledgeNote>(`/api/notes/${id}`, {
       method: "PATCH",

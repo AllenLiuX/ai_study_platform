@@ -17,6 +17,7 @@ import {
   chatApi,
   materialsApi,
   metaApi,
+  notesApi,
   sendMessageStream,
   studentApi,
 } from "@/lib/api";
@@ -349,12 +350,19 @@ export default function ChatSessionPage() {
                 · {agent.role}
               </span>
             </div>
-            <ModelSelector
-              tiers={tiers}
-              value={selectedTier}
-              onChange={pickTier}
-              disabled={isStreaming}
-            />
+            <div className="flex items-center gap-2">
+              <SessionToNoteButton
+                sessionId={sessionId}
+                messageCount={messages.length}
+                disabled={isStreaming}
+              />
+              <ModelSelector
+                tiers={tiers}
+                value={selectedTier}
+                onChange={pickTier}
+                disabled={isStreaming}
+              />
+            </div>
           </div>
           {loading ? (
             <div className="flex-1 space-y-4 p-6">
@@ -494,6 +502,104 @@ function GlobeIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M2 12h20" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
+/**
+ * 「📝 整理整段对话为笔记」按钮 — 复用 notesApi.createFromSession。
+ * - 状态:idle / generating / saved (短暂)
+ * - 成功后 invalidate notes cache + 跳到 /notes/{id}
+ * - 至少有 2 条消息才允许点(welcome + 至少 1 轮交互)
+ */
+function SessionToNoteButton({
+  sessionId,
+  messageCount,
+  disabled,
+}: {
+  sessionId: string;
+  messageCount: number;
+  disabled?: boolean;
+}) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  // welcome 消息也算一条;真正能蒸馏的需要至少有 user 1 + assistant 1
+  const tooShort = messageCount < 2;
+  const isDisabled = disabled || status === "saving" || tooShort;
+
+  async function handleClick() {
+    if (isDisabled) return;
+    setStatus("saving");
+    setError(null);
+    try {
+      const note = await notesApi.createFromSession({ session_id: sessionId });
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
+      queryClient.setQueryData(["note", note.id], note);
+      router.push(`/notes/${note.id}`);
+    } catch (err) {
+      setStatus("error");
+      setError(err instanceof Error ? err.message : "整理失败,请重试");
+      // 5s 后回到 idle 让用户能再点
+      setTimeout(() => {
+        setStatus("idle");
+        setError(null);
+      }, 5000);
+    }
+  }
+
+  const title = tooShort
+    ? "对话太短,先聊几轮再整理"
+    : status === "saving"
+      ? "AI 正在蒸馏整段对话…"
+      : status === "error"
+        ? error || "整理失败"
+        : "把整段对话蒸馏成一份汇总笔记";
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={isDisabled}
+      title={title}
+      className={
+        status === "error"
+          ? "flex items-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/5 px-3 py-1 text-xs text-destructive transition disabled:opacity-60"
+          : "flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground transition hover:border-primary/40 hover:bg-primary/5 hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
+      }
+    >
+      {status === "saving" ? <Loader2Icon /> : <NotebookIcon />}
+      <span className="hidden sm:inline">
+        {status === "saving"
+          ? "整理中…"
+          : status === "error"
+            ? "整理失败"
+            : "整理为笔记"}
+      </span>
+    </button>
+  );
+}
+
+function NotebookIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+      <path d="M2 6h2" />
+      <path d="M2 10h2" />
+      <path d="M2 14h2" />
+      <path d="M2 18h2" />
     </svg>
   );
 }
