@@ -91,23 +91,49 @@ def create_chat_session(*, user_id: str, payload: CreateSessionRequest) -> dict:
         agent = resolve_agent(payload.agent_type, owner_id=user_id)
     except KeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        # resolve_agent 在 DB 不可达 / 用户老师无法 fallback 时抛 RuntimeError
+        logger.warning("create_chat_session: resolve_agent 失败 %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     title = payload.title or _default_session_title(agent)
     subject_id = payload.subject_id or agent.subject_id
-    session = repos.create_session(
-        student_id=user_id,
-        agent_type=agent.agent_type,
-        subject_id=subject_id,
-        title=title,
-    )
+    try:
+        session = repos.create_session(
+            student_id=user_id,
+            agent_type=agent.agent_type,
+            subject_id=subject_id,
+            title=title,
+        )
+    except Exception as exc:  # supabase APIError / postgrest 4xx 都没单独类型
+        # CHECK 约束 / RLS / 网络异常都走这里 — 包成 400/500 让前端有 detail 可显示
+        msg = str(exc) or repr(exc)
+        logger.exception(
+            "create_chat_session: 写入 chat_sessions 失败 agent_type=%s",
+            agent.agent_type,
+        )
+        # 旧 schema 留下的 CHECK 约束特征
+        if "chat_sessions_agent_type_check" in msg or "violates check constraint" in msg:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"老师 {agent.agent_type} 不被当前数据库 schema 允许 — "
+                    "请确认已 apply 0009_phase5_chat_sessions_dynamic_agent.sql migration"
+                ),
+            ) from exc
+        raise HTTPException(status_code=500, detail=f"创建对话失败: {msg[:200]}") from exc
 
     if agent.welcome_message:
-        repos.insert_message(
-            session_id=session["id"],
-            role="assistant",
-            content=agent.welcome_message,
-            metadata={"kind": "welcome"},
-        )
+        try:
+            repos.insert_message(
+                session_id=session["id"],
+                role="assistant",
+                content=agent.welcome_message,
+                metadata={"kind": "welcome"},
+            )
+        except Exception as exc:
+            # welcome 消息写失败不阻塞 session 创建 — chat 页打开后用户依然能正常对话
+            logger.warning("welcome message insert 失败 (忽略): %s", exc)
     return session
 
 
