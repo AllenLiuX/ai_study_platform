@@ -23,6 +23,9 @@ async def config_check() -> dict:
         "openai_configured": bool(settings.openai_api_key)
         and not settings.openai_api_key.startswith("sk-proj-xxx"),
         "supabase_configured": settings.supabase_configured,
+        # Phase 5.5: 对话联网搜索是否可用 (前端 Globe toggle 用这个决定 disabled 态)
+        "web_search_enabled": settings.web_search_configured,
+        "web_search_provider": "tavily" if settings.web_search_configured else None,
         # 历史字段 (保持兼容,前端 Dashboard 用)
         "models": {
             "default": resolve_model("medium"),

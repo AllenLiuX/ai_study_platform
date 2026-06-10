@@ -50,6 +50,10 @@ class SendMessageRequest(BaseModel):
     # Phase 4: 图片附件 (拍照传题)。每项是 chat-attachments bucket 内的 storage_path
     # 形如 "<user_id>/<uuid>.png",后端会拉下来转 base64 inline 给 OpenAI vision
     image_urls: list[str] | None = None
+    # Phase 5.5: 联网搜索 toggle。仅当后端配了 TAVILY_API_KEY 才生效
+    # - False (默认): 不联网,行为与之前一致
+    # - True: 本条消息先用 Tavily 搜 query,把 top-k 网页结果与 RAG 一起喂 LLM
+    web_search: bool = False
 
 
 class ChatAttachment(BaseModel):

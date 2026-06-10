@@ -27,6 +27,7 @@ import type {
   Citation,
   FollowUp,
   ModelTierId,
+  WebSearchEvent,
 } from "@/lib/types";
 
 export default function ChatSessionPage() {
@@ -82,10 +83,35 @@ export default function ChatSessionPage() {
   const [streamingCitations, setStreamingCitations] = useState<Citation[]>([]);
   const [streamingFollowUps, setStreamingFollowUps] = useState<FollowUp[]>([]);
   const [streamingWarning, setStreamingWarning] = useState<string | null>(null);
+  const [streamingWebSearch, setStreamingWebSearch] =
+    useState<WebSearchEvent | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<ChatMessage[]>([]);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
+  // Phase 5.5: 联网搜索 toggle (按 agent 记忆)
+  const [webSearch, setWebSearch] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const webSearchAvailable = configQuery.data?.web_search_enabled ?? false;
+
+  // 按 agent type 持久化 web search toggle (与 modelTier 同一套机制)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(`web_search:${agentType}`);
+    setWebSearch(stored === "1");
+  }, [agentType]);
+
+  const toggleWebSearch = useCallback(
+    (next: boolean) => {
+      setWebSearch(next);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          `web_search:${agentType}`,
+          next ? "1" : "0",
+        );
+      }
+    },
+    [agentType],
+  );
 
   // Phase 5: 老师有 default_material_ids 时,进入对话默认勾上
   // 当 dynamic agent data 第一次出现(且未手动改过)时填充
@@ -152,6 +178,7 @@ export default function ChatSessionPage() {
       setStreamingCitations([]);
       setStreamingFollowUps([]);
       setStreamingWarning(null);
+      setStreamingWebSearch(null);
       setIsStreaming(true);
 
       const ctrl = new AbortController();
@@ -166,6 +193,7 @@ export default function ChatSessionPage() {
             onCitations: (items) => setStreamingCitations(items),
             onFollowUps: (items) => setStreamingFollowUps(items),
             onWarning: (msg) => setStreamingWarning(msg),
+            onWebSearch: (ev) => setStreamingWebSearch(ev),
             onDone: async () => {
               await queryClient.invalidateQueries({
                 queryKey: ["chat-messages", sessionId],
@@ -178,6 +206,7 @@ export default function ChatSessionPage() {
               setStreamingCitations([]);
               setStreamingFollowUps([]);
               setStreamingWarning(null);
+              setStreamingWebSearch(null);
               setIsStreaming(false);
               abortRef.current = null;
             },
@@ -194,6 +223,7 @@ export default function ChatSessionPage() {
               setStreamingCitations([]);
               setStreamingFollowUps([]);
               setStreamingWarning(null);
+              setStreamingWebSearch(null);
               setIsStreaming(false);
               abortRef.current = null;
             },
@@ -202,6 +232,7 @@ export default function ChatSessionPage() {
             materialIds: effectiveMaterialIds,
             modelTier: selectedTier ?? undefined,
             imageUrls: effectiveImagePaths.length ? effectiveImagePaths : undefined,
+            webSearch: webSearch && webSearchAvailable,
           },
           ctrl.signal,
         );
@@ -220,11 +251,20 @@ export default function ChatSessionPage() {
         setStreamingCitations([]);
         setStreamingFollowUps([]);
         setStreamingWarning(null);
+        setStreamingWebSearch(null);
         setIsStreaming(false);
         abortRef.current = null;
       }
     },
-    [sessionId, isStreaming, queryClient, selectedMaterialIds, selectedTier],
+    [
+      sessionId,
+      isStreaming,
+      queryClient,
+      selectedMaterialIds,
+      selectedTier,
+      webSearch,
+      webSearchAvailable,
+    ],
   );
 
   function stop() {
@@ -329,6 +369,9 @@ export default function ChatSessionPage() {
                   {streamingWarning}
                 </div>
               )}
+              {streamingWebSearch && (
+                <WebSearchBanner event={streamingWebSearch} />
+              )}
               <ChatWindow
                 agentType={agentType}
                 messages={messages}
@@ -347,6 +390,9 @@ export default function ChatSessionPage() {
             onSend={(text, imagePaths) => send(text, { imagePaths })}
             onStop={stop}
             showStarters={messages.length <= 1 && !isStreaming}
+            webSearch={webSearch}
+            onWebSearchChange={toggleWebSearch}
+            webSearchAvailable={webSearchAvailable}
             picker={
               <MaterialPicker
                 materials={materialsQuery.data ?? []}
@@ -365,5 +411,89 @@ export default function ChatSessionPage() {
         />
       </div>
     </div>
+  );
+}
+
+// Phase 5.5: 联网搜索进度条 — searching / done / error 三态
+function WebSearchBanner({ event }: { event: WebSearchEvent }) {
+  if (event.status === "searching") {
+    return (
+      <div className="flex items-center gap-2 border-b border-primary/15 bg-primary/5 px-4 py-1.5 text-xs text-primary">
+        <Loader2Icon />
+        <span className="font-medium">正在联网搜索…</span>
+        {event.query && (
+          <span className="truncate text-muted-foreground">
+            「{event.query.slice(0, 60)}
+            {event.query.length > 60 ? "…" : ""}」
+          </span>
+        )}
+      </div>
+    );
+  }
+  if (event.status === "done") {
+    const count = event.count ?? 0;
+    if (count === 0) {
+      return (
+        <div className="border-b border-amber-200/40 bg-amber-50/60 px-4 py-1.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          联网搜索完成,但未找到相关网页;本次将基于通识回答。
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-2 border-b border-primary/15 bg-primary/5 px-4 py-1.5 text-xs text-primary">
+        <GlobeIcon />
+        <span className="font-medium">
+          联网拿到 {count} 条网页
+          {event.response_time_ms ? `(${event.response_time_ms} ms)` : ""}
+        </span>
+      </div>
+    );
+  }
+  if (event.status === "error") {
+    return (
+      <div className="border-b border-destructive/30 bg-destructive/5 px-4 py-1.5 text-xs text-destructive">
+        联网搜索失败:{event.message || "未知错误"}。本次将仅基于本地资料/笔记回答。
+      </div>
+    );
+  }
+  return null;
+}
+
+function Loader2Icon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="animate-spin"
+      aria-hidden
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+function GlobeIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
   );
 }

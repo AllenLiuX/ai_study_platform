@@ -5,7 +5,9 @@ import {
   BookOpen,
   Check,
   Compass,
+  ExternalLink,
   FileText,
+  Globe,
   Loader2,
   Notebook,
   PencilLine,
@@ -432,17 +434,23 @@ function CitationList({ citations }: { citations: Citation[] }) {
   const materialCount = citations.filter(
     (c) => (c.source ?? "material") === "material",
   ).length;
-  const noteCount = citations.length - materialCount;
+  const noteCount = citations.filter((c) => c.source === "note").length;
+  const webCount = citations.filter((c) => c.source === "web").length;
+  const headerParts: string[] = [];
+  if (materialCount > 0) headerParts.push(`资料 ${materialCount}`);
+  if (noteCount > 0) headerParts.push(`笔记 ${noteCount}`);
+  if (webCount > 0) headerParts.push(`网页 ${webCount}`);
+
   return (
     <div className="surface-ai mt-3 rounded-xl border px-3 py-2 text-xs">
       <div className="mb-1.5 flex items-center gap-1.5 text-primary">
-        <FileText className="h-3 w-3" />
+        {webCount > 0 ? (
+          <Globe className="h-3 w-3" />
+        ) : (
+          <FileText className="h-3 w-3" />
+        )}
         <span className="font-medium">
-          基于
-          {materialCount > 0 && `资料 ${materialCount}`}
-          {materialCount > 0 && noteCount > 0 && " + "}
-          {noteCount > 0 && `笔记 ${noteCount}`}
-          回答 · 共 {citations.length} 段
+          基于 {headerParts.join(" + ")} 回答 · 共 {citations.length} 段
         </span>
       </div>
       <ol className="flex flex-col gap-1">
@@ -451,6 +459,35 @@ function CitationList({ citations }: { citations: Citation[] }) {
           const title =
             c.source_title || c.material_title || c.note_title || "(无标题)";
           const key = `${c.source_id ?? c.material_id ?? c.note_id ?? "x"}-${c.chunk_index}-${i}`;
+          const url = c.url || (src === "web" ? c.source_id : undefined);
+          const body = (
+            <>
+              {src === "note" && (
+                <span className="mr-1 inline-flex items-center gap-0.5 rounded bg-secondary px-1 text-[9px] uppercase tracking-wider">
+                  笔记
+                </span>
+              )}
+              {src === "web" && (
+                <span className="mr-1 inline-flex items-center gap-0.5 rounded bg-primary/15 px-1 text-[9px] uppercase tracking-wider text-primary">
+                  <Globe className="h-2.5 w-2.5" />
+                  网页
+                </span>
+              )}
+              {src === "web" ? (
+                <>《{title}》</>
+              ) : (
+                <>
+                  《{title}》第 {c.chunk_index + 1} 段
+                </>
+              )}
+              <span className="ml-1 text-muted-foreground/60">
+                ·{" "}
+                {src === "web"
+                  ? `相关度 ${(c.similarity * 100).toFixed(0)}%`
+                  : `相似度 ${(c.similarity * 100).toFixed(0)}%`}
+              </span>
+            </>
+          );
           return (
             <li
               key={key}
@@ -459,17 +496,20 @@ function CitationList({ citations }: { citations: Citation[] }) {
               <span className="mt-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-primary/10 px-1 text-[10px] font-semibold text-primary">
                 {i + 1}
               </span>
-              <span className="flex-1 truncate">
-                {src === "note" ? (
-                  <span className="mr-1 inline-flex items-center gap-0.5 rounded bg-secondary px-1 text-[9px] uppercase tracking-wider">
-                    笔记
-                  </span>
-                ) : null}
-                《{title}》第 {c.chunk_index + 1} 段
-                <span className="ml-1 text-muted-foreground/60">
-                  · 相似度 {(c.similarity * 100).toFixed(0)}%
-                </span>
-              </span>
+              {url ? (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="group flex-1 truncate text-muted-foreground transition hover:text-primary"
+                  title={url}
+                >
+                  {body}
+                  <ExternalLink className="ml-0.5 inline-block h-2.5 w-2.5 opacity-50 transition group-hover:opacity-100" />
+                </a>
+              ) : (
+                <span className="flex-1 truncate">{body}</span>
+              )}
             </li>
           );
         })}

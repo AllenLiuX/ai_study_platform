@@ -27,6 +27,8 @@ _NOTE_SYSTEM = """你是一个 AI 学习平台的"笔记提取助手"。
 - 标题要点出核心知识点本身 (不是讨论过程),例如:"LRU 缓存淘汰策略"、"勾股定理的几何证明"
 - summary 一句话浓缩 (≤ 40 字),便于后续 search / 列表展示
 - content 是 markdown 正文,要点结构清晰:概念 → 关键性质 → 例子 / 推导 → 易错点。可以含 LaTeX (用 $...$ / $$...$$)。≤ 1500 字
+- 如果对话里有"参考资料"区(可能来自联网搜索 / 上传资料 / 已有笔记),在 markdown 末尾加一段
+  `## 参考资料` 列出来源(只保留对内容最相关的 3-5 条);带 URL 的写成 markdown 链接
 - tags 给出 3-6 个标签 (与知识点领域相关,不要"对话"这类 meta 标签)
 - 如果对话信息不足以形成有意义的笔记 (例如只是闲聊 / 老师还没解释完),设 insufficient=true 并简要说明
 
@@ -109,6 +111,28 @@ async def generate_note_from_message(
         f"# 学生提问\n{user_msg.strip()}\n\n"
         f"# 老师回答\n{assistant_msg.strip()}"
     )
+
+    # Phase 5.5: 如果这轮回答带了 citations (含 web / material / note),拼一段
+    # "参考资料"喂给 LLM,让生成的笔记 markdown 末尾保留可点的来源链接
+    citations = (assistant.get("metadata") or {}).get("citations") or []
+    if citations:
+        cite_lines: list[str] = []
+        for i, c in enumerate(citations[:10], start=1):
+            src = c.get("source") or "material"
+            title = (
+                c.get("source_title")
+                or c.get("material_title")
+                or c.get("note_title")
+                or "(无标题)"
+            )
+            if src == "web":
+                url = c.get("url") or c.get("source_id") or ""
+                line = f"{i}. [{src}] [{title}]({url})" if url else f"{i}. [{src}] {title}"
+            else:
+                line = f"{i}. [{src}] {title}"
+            cite_lines.append(line)
+        if cite_lines:
+            transcript += "\n\n# 参考资料 (本轮回答引用)\n" + "\n".join(cite_lines)
 
     client = get_client()
     model = resolve_model(ModelTier.MEDIUM)

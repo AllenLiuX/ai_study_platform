@@ -229,6 +229,25 @@
 > 3. 进会话提"帮我规划下两周的学习节奏" → 老师拆出 10 个核心知识点
 > 4. 一个个聊 → 每聊完一个核心点点「保存为笔记」 → 知识点沉淀到笔记库,下次再聊会自动召回 → 复习时也能在 `/notes` 看 markdown 总结
 
+### Phase 5.5 — 对话联网搜索 (Tavily) ✅
+
+针对"最新模型、特定领域、训练截止后的事实性问题",给对话页加了显式的 🌐 联网搜索 toggle。开启后,这条提问会先用 Tavily 搜实时网页,把 top-k 结果作为 RAG context 喂给 LLM,**与本地资料/笔记同一条 retrieval pipeline 合并**,citations 也带 URL,生成的笔记自动保留参考链接。
+
+- **Provider**:Tavily(为 LLM 设计的 search API,免费 tier 1000/月,`basic` 档 ~$0.005/搜索;无 key 时前端 toggle 自动 disabled,核心功能完全不受影响)。换 Brave / SerpAPI 只改 [`services/web_search.py`](api/app/services/web_search.py) 内部实现即可
+- **新增 `services/web_search.py`**:`is_enabled()` / `search()` / `search_with_timeout(15s)` 三个 API,httpx async + 韧性兜底(超时 / 网络错 / 401 / 432 都包成 `RuntimeError`,主对话不被阻塞)
+- **`RetrievedChunk.source` 加 `"web"`**:同一条 retrieval 管道吐三种来源,`format_context` 给每段加 `[网页]/[资料]/[笔记]` 标签 + URL,LLM 在生成时能正确使用 `[1] [2]` 引用
+- **SSE 新事件 `web_search`**(`searching` / `done` / `error` 三态):前端 `WebSearchBanner` 在 ChatWindow 顶部展示进度,搜完会显示"联网拿到 N 条网页(150 ms)"
+- **跨源 merge**:web (Tavily score) + 本地 (cosine similarity) 量纲接近,直接按 similarity 排序,LLM 看到的角标按重要性靠前
+- **Citation UI 升级** ([`ChatWindow.CitationList`](web/components/ChatWindow.tsx)):web 来源带 Globe 徽章 + 可点 URL 跳转(新标签);列表头从"基于资料 N 回答"变成"基于 资料 N + 笔记 M + 网页 K 回答"
+- **`ChatInput` 工具条加 🌐 Globe toggle**:状态 `localStorage` 按 agent 记忆(跟 `model_tier` 同一套机制);后端未配置时自动 disabled + tooltip 提示
+- **笔记蒸馏整合** ([`notes_service.py`](api/app/services/notes_service.py)):蒸馏 prompt 看到 `metadata.citations` 含 web sources 时,自动把"# 参考资料"段塞进 transcript;生成的笔记 markdown 末尾保留可点的来源链接,下次复习 / RAG 召回照样可追溯
+- **`/health/config`**:暴露 `web_search_enabled` / `web_search_provider`,前端不用试探就知道按钮该不该亮
+
+**验证**:[`scripts/phase55_smoke.py`](scripts/phase55_smoke.py) — 9 项断言(`is_enabled` 一致性 / 无 key 抛 `RuntimeError` 不静默 / `_web_results_to_chunks` 透传 score / `format_context` 含 `[网页]` 标签 + URL / `_citation_payload(web)` 暴露 url+extra / `SendMessageRequest.web_search` 默认 False / `/health/config.web_search_enabled` / notes 蒸馏 transcript 含参考资料段)。`npx next build` 13 路由全绿,`/chat/[sessionId]` bundle 仅 +1.3 kB。
+
+> 用法:在对话里点左下角 🌐 → 提问 "GPT-5.5 跟 GPT-5.4 有什么差异?" / "美股期权 IV 最近一周怎么样?" → 后端先搜 → SSE 推 `web_search` 进度 → citations 里出现「网页」徽章 + URL → 点「保存为笔记」时生成的 markdown 末尾自动保留参考链接。
+> 成本估算:Tavily basic 档 ~$0.005 / 搜索,5 条结果 ≈ 1-2k tokens 上下文增量,LLM 侧 medium tier 约 +$0.01 / 轮。一杯咖啡(¥30)可以联网搜 ~600 次。
+
 ### 后续 Phase Roadmap
 
 - **Phase 6 — 学习计划 + 复习闭环**:基于笔记的间隔重复 SRS(到期就出题)、学习路径树(老师把领域拆成 DAG 节点 → 节点 ↔ 笔记 ↔ 资料 三向链接)、`student_daily_tasks` 与节点状态联动
@@ -245,6 +264,7 @@
 | 后端 | FastAPI + Pydantic + httpx + OpenAI SDK + `supabase-py` |
 | 数据库 | Supabase Postgres (含 Auth / Storage / pgvector) |
 | AI | OpenAI 5 档可选 (Phase 3.5):**low** `gpt-5.4-mini` / **medium** `gpt-5.4` (默认) / **high** `gpt-5.5` / **extra-high** `o3` / **max** `gpt-5.5-pro`;`text-embedding-3-small` (Phase 1 RAG);后台抽取/建议用 LOW 控本,任务规划用 MEDIUM 保质;学生可在对话里随时切档 |
+| 联网搜索 (Phase 5.5) | Tavily Search API · `basic` 档 ~$0.005/搜索 · 免费 1000/月 · 无 key 时前端 toggle 自动 disabled,不影响核心功能 |
 | 部署 (后续) | Vercel (前端) + Railway/Render/自建 (后端) |
 
 ---
@@ -272,6 +292,8 @@ flowchart TB
   FastAPI -.->|"gpt-5.4 JSON<br/>规划 3 件事"| Tasks
   FastAPI -.->|"gpt-5.4 JSON<br/>蒸馏对话→笔记"| Notes
   RAG -.->|"materials + notes<br/>跨源 merge"| FastAPI
+  FastAPI -.->|"Tavily search<br/>(Phase 5.5)"| Tavily["Web (Tavily)<br/>实时网页 RAG"]
+  Tavily -.->|"source=web<br/>同一条 retrieval"| FastAPI
 ```
 
 ---
@@ -309,6 +331,7 @@ student_coach/
     phase4_smoke.py                 # Phase 4 (图片对话) 后端冒烟
     phase41_smoke.py                # Phase 4.1 (资料视觉提取) 后端冒烟
     phase5_smoke.py                 # Phase 5 (自定义老师 + 笔记) 后端冒烟
+    phase55_smoke.py                # Phase 5.5 (对话联网搜索) 后端冒烟
     frontend_smoke.py               # 前端路由 + 中间件冒烟
     apply_migration.py              # psycopg 直连应用任意 .sql migration
     generate_knowledge_notes.py     # Phase 1.5: 基于课标生成 AI 讲义

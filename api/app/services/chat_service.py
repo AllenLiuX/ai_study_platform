@@ -19,6 +19,7 @@ from ..schemas.chat import CreateSessionRequest
 from .progress_extractor import extract_and_update
 from .retrieval import RetrievedChunk, format_context, retrieve_for_chat
 from .suggester import suggest_follow_ups
+from . import web_search as web_search_svc
 
 logger = logging.getLogger(__name__)
 
@@ -132,28 +133,66 @@ def list_sessions(user_id: str) -> list[dict]:
 def _citation_payload(chunks: list[RetrievedChunk]) -> list[dict]:
     """前端可消费的引用条目。
 
-    Phase 5: 同时含 material / note 两种来源,前端 ChatWindow 用 `source` 区分图标。
+    Phase 5: 同时含 material / note 来源,前端 ChatWindow 用 `source` 区分图标。
+    Phase 5.5: 新增 `source="web"` (Tavily 联网搜索),extra 里带 url。
     保留 material_id / material_title 旧字段以兼容老消息渲染。
     """
     out: list[dict] = []
     for c in chunks:
         item = {
-            "source": c.source,  # "material" | "note"
+            "source": c.source,  # "material" | "note" | "web"
             "source_id": c.source_id,
             "source_title": c.source_title,
             "chunk_index": c.chunk_index,
             "similarity": round(c.similarity, 4),
-            "snippet": c.content[:160],
+            "snippet": c.content[:200],
         }
         # 旧字段兼容
         if c.source == "material":
             item["material_id"] = c.source_id
             item["material_title"] = c.source_title
-        else:
+        elif c.source == "note":
             item["note_id"] = c.source_id
             item["note_title"] = c.source_title
+        elif c.source == "web":
+            extra = c.extra or {}
+            item["url"] = extra.get("url") or c.source_id
+            if extra.get("published_date"):
+                item["published_date"] = extra["published_date"]
+        if c.extra:
+            # Tavily score / 笔记 tags / 等保留在 extra,前端可选展示
+            item["extra"] = c.extra
         out.append(item)
     return out
+
+
+def _web_results_to_chunks(
+    results,  # list[WebSearchResult]
+) -> list[RetrievedChunk]:
+    """把 Tavily 结果包成统一的 RetrievedChunk(source=web),
+    后续 format_context / citation 全走同一条 pipeline。
+    """
+    chunks: list[RetrievedChunk] = []
+    for i, r in enumerate(results):
+        chunks.append(
+            RetrievedChunk(
+                chunk_id=f"web:{i}",
+                source="web",
+                source_id=r.url,
+                source_title=r.title,
+                source_subject=None,
+                chunk_index=i,
+                # Tavily content 已经是 snippet,塞 prompt 安全
+                content=r.content,
+                similarity=float(r.score),
+                extra={
+                    "url": r.url,
+                    "published_date": r.published_date,
+                    "provider": "tavily",
+                },
+            )
+        )
+    return chunks
 
 
 async def stream_assistant_reply(
@@ -166,6 +205,7 @@ async def stream_assistant_reply(
     background_tasks: BackgroundTasks | None = None,
     model_tier: str | None = None,
     image_urls: list[str] | None = None,
+    web_search: bool = False,
 ) -> AsyncIterator[str]:
     """流式生成 assistant 回复。
 
@@ -190,6 +230,9 @@ async def stream_assistant_reply(
         user_meta["image_urls"] = [
             p for p in image_urls if isinstance(p, str) and p.startswith(f"{user_id}/")
         ]
+    # Phase 5.5: 学生显式开了联网搜索 toggle,落库标记一下,便于回看 / 审计
+    if web_search:
+        user_meta["web_search"] = True
     # 纯图无文字时给个占位 — chat_messages.content 是 NOT NULL,且前端做了
     # 默认占位,这里再兜一道,避免边角 case 触发 db 校验失败
     safe_content = user_content
@@ -237,8 +280,55 @@ async def stream_assistant_reply(
         rag_context: str | None = None
         # Phase 5: 总是尝试召回笔记 (用户私有 KP);material_ids 显式空时仍只走笔记
         has_materials = material_ids is not None and len(material_ids) > 0
+
+        # Phase 5.5: 联网搜索 — 仅 toggle ON + 后端配了 key + 文字 query 非空 才走
+        web_chunks: list[RetrievedChunk] = []
+        if web_search and user_content.strip():
+            if not web_search_svc.is_enabled():
+                yield _sse(
+                    "warning",
+                    {
+                        "message": "联网搜索未在后端启用 (缺少 TAVILY_API_KEY),本次回退到本地 RAG"
+                    },
+                )
+            else:
+                yield _sse(
+                    "web_search",
+                    {"status": "searching", "query": user_content[:200]},
+                )
+                try:
+                    ws = await web_search_svc.search_with_timeout(
+                        user_content, total_timeout_s=15.0
+                    )
+                    web_chunks = _web_results_to_chunks(ws.results)
+                    yield _sse(
+                        "web_search",
+                        {
+                            "status": "done",
+                            "count": len(ws.results),
+                            "query": ws.query,
+                            "response_time_ms": ws.response_time_ms,
+                            "results": [
+                                {
+                                    "title": r.title,
+                                    "url": r.url,
+                                    "snippet": r.content[:200],
+                                    "score": round(r.score, 4),
+                                    "published_date": r.published_date,
+                                }
+                                for r in ws.results
+                            ],
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("web search failed: %s", exc)
+                    yield _sse(
+                        "web_search",
+                        {"status": "error", "message": str(exc)},
+                    )
+
         try:
-            citations = await retrieve_for_chat(
+            local_chunks = await retrieve_for_chat(
                 query=user_content,
                 owner_id=user_id,
                 material_ids=material_ids if has_materials else None,
@@ -252,15 +342,23 @@ async def stream_assistant_reply(
                 "warning",
                 {"message": f"资料/笔记检索失败,本次将基于通识知识回答 ({exc})"},
             )
-            citations = []
+            local_chunks = []
+
+        # web + local 合并:web 走 Tavily score (0-1),local 走 cosine 相似度,
+        # 两者量纲接近;直接 sort by similarity 让 LLM 看到的角标按重要性
+        citations = local_chunks + web_chunks
+        citations.sort(key=lambda c: c.similarity, reverse=True)
 
         if citations:
-            rag_context = format_context(citations)
+            rag_context = format_context(citations, max_chars=5000)
             yield _sse("citations", {"items": _citation_payload(citations)})
-        elif has_materials:
+        elif has_materials or web_search:
+            # 显式开了 RAG 或联网,但啥都没拿到
             yield _sse(
                 "warning",
-                {"message": "未在选中的资料/笔记里找到与问题相关的内容,本次将基于通识知识回答"},
+                {
+                    "message": "未召回到相关资料/笔记/网页,本次将基于通识知识回答"
+                },
             )
 
         async for delta in stream_reply(

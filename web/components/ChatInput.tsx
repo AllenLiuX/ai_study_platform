@@ -1,6 +1,6 @@
 "use client";
 
-import { ImagePlus, Loader2, Send, Square, X } from "lucide-react";
+import { Globe, ImagePlus, Loader2, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,11 @@ interface ChatInputProps {
   showStarters: boolean;
   /** 可选:渲染在输入框上方的额外控件 (例如资料引用 picker) */
   picker?: React.ReactNode;
+  /** Phase 5.5: 联网搜索 toggle (受控) */
+  webSearch?: boolean;
+  onWebSearchChange?: (next: boolean) => void;
+  /** 后端是否支持联网搜索 (没配 TAVILY_API_KEY 时按钮 disabled) */
+  webSearchAvailable?: boolean;
 }
 
 // Phase 4: 题目图片附件
@@ -47,6 +52,9 @@ export function ChatInput({
   onStop,
   showStarters,
   picker,
+  webSearch = false,
+  onWebSearchChange,
+  webSearchAvailable = false,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const [images, setImages] = useState<AttachedImage[]>([]);
@@ -298,6 +306,35 @@ export function ChatInput({
           >
             <ImagePlus className="h-4 w-4" />
           </Button>
+          {/* Phase 5.5: 联网搜索 toggle */}
+          {onWebSearchChange && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className={cn(
+                "transition",
+                webSearchAvailable
+                  ? webSearch
+                    ? "bg-primary/10 text-primary hover:bg-primary/15"
+                    : "text-muted-foreground hover:text-foreground"
+                  : "text-muted-foreground/40",
+              )}
+              title={
+                !webSearchAvailable
+                  ? "联网搜索未启用 (后端未配置 TAVILY_API_KEY)"
+                  : webSearch
+                    ? "联网搜索:开 — 本条提问会先用 Tavily 搜实时网页"
+                    : "联网搜索:关 — 点击开启,获取实时网页材料"
+              }
+              disabled={disabled || !webSearchAvailable}
+              onClick={() => onWebSearchChange(!webSearch)}
+              aria-pressed={webSearch}
+              aria-label="联网搜索"
+            >
+              <Globe className="h-4 w-4" />
+            </Button>
+          )}
           <Textarea
             ref={textareaRef}
             value={value}
@@ -344,8 +381,14 @@ export function ChatInput({
             </Button>
           )}
         </div>
-        <p className="mt-2 text-center text-xs text-muted-foreground">
-          AI 老师可能会犯错。重要的题目记得自己再验证一遍 🙂
+        <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
+          {webSearch && webSearchAvailable && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+              <Globe className="h-2.5 w-2.5" />
+              联网搜索 · 开
+            </span>
+          )}
+          <span>AI 老师可能会犯错。重要的题目记得自己再验证一遍 🙂</span>
         </p>
       </div>
     </div>

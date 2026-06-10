@@ -21,6 +21,7 @@ import type {
   UpdateNoteRequest,
   UpdateUserAgentRequest,
   UserAgent,
+  WebSearchEvent,
 } from "./types";
 
 // -----------------------------------------------------------------------------
@@ -134,6 +135,9 @@ export interface HealthConfig {
   /** Phase 3.5: 5 档可选模型 */
   model_tiers?: ModelTierInfo[];
   default_tier?: ModelTierId;
+  /** Phase 5.5: 对话联网搜索是否启用 (后端是否配了 TAVILY_API_KEY) */
+  web_search_enabled?: boolean;
+  web_search_provider?: string | null;
   cors_origins: string[];
 }
 
@@ -337,6 +341,8 @@ export interface SendMessageHandlers {
   onWarning?: (message: string) => void;
   onDelta: (text: string) => void;
   onFollowUps?: (items: FollowUp[]) => void;
+  /** Phase 5.5: 联网搜索进度事件 (searching / done / error) */
+  onWebSearch?: (event: WebSearchEvent) => void;
   onDone?: (info: {
     length: number;
     citation_count?: number;
@@ -351,6 +357,8 @@ export interface SendMessageOptions {
   modelTier?: ModelTierId | null;
   /** Phase 4: 题目图片附件,值是 chat-attachments bucket 内的 storage_path 列表 */
   imageUrls?: string[];
+  /** Phase 5.5: 本条消息是否启用联网搜索 (前端 Globe toggle 控制) */
+  webSearch?: boolean;
 }
 
 export async function sendMessageStream(
@@ -370,6 +378,9 @@ export async function sendMessageStream(
   }
   if (options.imageUrls && options.imageUrls.length > 0) {
     body.image_urls = options.imageUrls;
+  }
+  if (options.webSearch) {
+    body.web_search = true;
   }
   const resp = await fetch(
     `${API_BASE}/api/chat/sessions/${sessionId}/messages`,
@@ -419,6 +430,7 @@ export async function sendMessageStream(
         else if (event === "warning") handlers.onWarning?.(payload.message ?? "");
         else if (event === "delta") handlers.onDelta(payload.text ?? "");
         else if (event === "follow_ups") handlers.onFollowUps?.(payload.items ?? []);
+        else if (event === "web_search") handlers.onWebSearch?.(payload as WebSearchEvent);
         else if (event === "done") handlers.onDone?.(payload);
         else if (event === "error") handlers.onError?.(payload.message ?? "服务异常");
       } catch (err) {

@@ -171,6 +171,7 @@ async def send_message(
             background_tasks=background_tasks,
             model_tier=payload.model_tier,
             image_urls=payload.image_urls,
+            web_search=payload.web_search,
         ),
         media_type="text/event-stream",
         headers={

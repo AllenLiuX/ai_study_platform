@@ -48,8 +48,9 @@ export interface ChatSession {
   updated_at?: string | null;
 }
 
-// Phase 5: citation 现在可以来自 material 或 note
-export type CitationSource = "material" | "note";
+// Phase 5: citation 来自 material 或 note
+// Phase 5.5: 新增 "web" 来源 — 对话联网搜索 (Tavily) 拿到的网页
+export type CitationSource = "material" | "note" | "web";
 
 export interface Citation {
   /** Phase 5: 引用来源类型 (旧消息可能没有,默认按 material 处理) */
@@ -62,9 +63,32 @@ export interface Citation {
   /** Phase 5: 笔记引用 */
   note_id?: string;
   note_title?: string;
+  /** Phase 5.5: web 来源 — url 直接给前端可点击 */
+  url?: string;
+  published_date?: string | null;
+  /** 后端 extra 字段透传 (Tavily score / 笔记 tags / 等) */
+  extra?: Record<string, unknown>;
   chunk_index: number;
   similarity: number;
   snippet: string;
+}
+
+// Phase 5.5: 对话联网搜索的 SSE 进度事件
+export interface WebSearchResultPreview {
+  title: string;
+  url: string;
+  snippet: string;
+  score: number;
+  published_date?: string | null;
+}
+
+export interface WebSearchEvent {
+  status: "searching" | "done" | "error";
+  query?: string;
+  count?: number;
+  response_time_ms?: number;
+  message?: string;
+  results?: WebSearchResultPreview[];
 }
 
 export type FollowUpType = "deep_dive" | "explore" | "practice" | "review";

@@ -51,6 +51,14 @@ class Settings(BaseSettings):
         default="", alias="SUPABASE_SERVICE_ROLE_KEY"
     )
 
+    # Phase 5.5: 对话联网搜索 (可选)
+    # 不配置时,前端 toggle 自动 disabled,Tavily 路径走不到
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
+    tavily_max_results: int = Field(default=5, alias="TAVILY_MAX_RESULTS")
+    tavily_search_depth: str = Field(
+        default="basic", alias="TAVILY_SEARCH_DEPTH"
+    )  # "basic" | "advanced"
+
     backend_cors_origins: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
         alias="BACKEND_CORS_ORIGINS",
@@ -84,6 +92,12 @@ class Settings(BaseSettings):
             and not self.supabase_service_role_key.startswith("PLACEHOLDER")
         )
 
+    @property
+    def web_search_configured(self) -> bool:
+        """Phase 5.5: 是否配了联网搜索 provider (目前是 Tavily)。"""
+        key = self.tavily_api_key.strip()
+        return bool(key) and not key.startswith("PLACEHOLDER")
+
 
 def _ensure_no_proxy(settings: Settings) -> None:
     """把 Supabase / OpenAI 加入 NO_PROXY,绕过本地企业代理。
@@ -93,7 +107,13 @@ def _ensure_no_proxy(settings: Settings) -> None:
     自定义 client,但它默认 trust_env=True,所以能尊重 NO_PROXY。这里在配置初始化时
     把直连服务追加进去,前端和后端的 httpx.Client(trust_env=True) 都会自动绕过代理。
     """
-    extras: list[str] = ["api.openai.com", "files.openai.com", "openai.com"]
+    extras: list[str] = [
+        "api.openai.com",
+        "files.openai.com",
+        "openai.com",
+        # Phase 5.5: Tavily 联网搜索
+        "api.tavily.com",
+    ]
     if settings.supabase_url:
         host = urlparse(settings.supabase_url).hostname
         if host:

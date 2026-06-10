@@ -4,12 +4,16 @@ Phase 5 扩展:
 - 同时支持 material_chunks (公共/私有资料) 与 knowledge_note_chunks (私有笔记)
 - chat_service 调 `retrieve_for_chat`,merge 后按 similarity 排序
 - RetrievedChunk 多了 `source` (material/note) + `source_id` 区分
+
+Phase 5.5 扩展:
+- 新增 `source="web"` 用于对话联网搜索 (Tavily 等);走同一条 RetrievedChunk
+  通道,format_context 自动带 `[网页]` 标签,citation 落库带 url
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from ..db.supabase_client import get_admin_client
@@ -17,17 +21,19 @@ from .embedding import embed_one
 
 logger = logging.getLogger(__name__)
 
-RetrievalSource = Literal["material", "note"]
+RetrievalSource = Literal["material", "note", "web"]
 
 
 @dataclass(slots=True)
 class RetrievedChunk:
     """与前端 / LLM 上下文交换的 chunk 抽象。
 
-    - source: 来源类型 (material / note)
-    - source_id: material_id 或 note_id
-    - source_title: 资料标题 / 笔记标题
-    - source_subject: material 才有 (笔记走 tags),笔记侧填 None
+    - source: 来源类型 (material / note / web)
+    - source_id: material_id / note_id / url
+    - source_title: 资料标题 / 笔记标题 / 网页 title
+    - source_subject: material 才有 (笔记走 tags),其他填 None
+    - similarity: pgvector cosine 相似度;web 走 Tavily relevance score
+    - extra: 附加信息,web 至少含 url / published_date,note 含 tags
     """
 
     chunk_id: str
@@ -38,7 +44,7 @@ class RetrievedChunk:
     chunk_index: int
     content: str
     similarity: float
-    extra: dict | None = None
+    extra: dict | None = field(default=None)
 
     # 兼容字段 — 旧代码可能直接读 material_id / material_title
     @property
@@ -232,19 +238,38 @@ async def retrieve_chunks(
     )
 
 
+_SOURCE_LABEL_CN: dict[str, str] = {
+    "material": "资料",
+    "note": "笔记",
+    "web": "网页",
+}
+
+
 def format_context(chunks: list[RetrievedChunk], max_chars: int = 4000) -> str:
-    """把召回的 chunks 拼成可注入 prompt 的上下文段。"""
+    """把召回的 chunks 拼成可注入 prompt 的上下文段。
+
+    给每段加 `[来源类型]《标题》` 让 LLM 在回答时按 [1] [2] 形式引用,
+    web 来源额外把 URL 也带上,方便模型在正文里直接给链接。
+    """
     if not chunks:
         return ""
     parts: list[str] = []
     used = 0
     for i, c in enumerate(chunks, start=1):
         snippet = c.content.strip()
-        source_label = "资料" if c.source == "material" else "笔记"
-        header = (
-            f"[{i}] [{source_label}]《{c.source_title}》第 {c.chunk_index + 1} 段"
-            f" (相似度 {c.similarity:.2f})"
-        )
+        label = _SOURCE_LABEL_CN.get(c.source, "资料")
+        header_parts = [
+            f"[{i}] [{label}]《{c.source_title}》",
+        ]
+        if c.source == "web":
+            url = (c.extra or {}).get("url") if c.extra else None
+            if url:
+                header_parts.append(f"({url})")
+            header_parts.append(f"[相关度 {c.similarity:.2f}]")
+        else:
+            header_parts.append(f"第 {c.chunk_index + 1} 段")
+            header_parts.append(f"(相似度 {c.similarity:.2f})")
+        header = " ".join(header_parts)
         block = f"{header}\n{snippet}"
         if used + len(block) > max_chars and parts:
             break
