@@ -101,6 +101,9 @@ class GenerateAgentSpecRequest(BaseModel):
 
 
 class GeneratedAgentSpec(BaseModel):
+    # Phase 5 后续:LLM 直接给一个英文 slug,前端不再客户端转 — 避免中文 display_name
+    # 拿不到 ASCII slug 的尴尬
+    agent_key: str
     display_name: str
     emoji: str
     tagline: str

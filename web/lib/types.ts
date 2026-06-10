@@ -266,6 +266,8 @@ export type UpdateUserAgentRequest = Partial<CreateUserAgentRequest> & {
 };
 
 export interface GeneratedAgentSpec {
+  /** Phase 5: LLM 直接给的英文 slug,前端不再客户端转 — 中文 display_name 也能拿到可用 key */
+  agent_key: string;
   display_name: string;
   emoji: string;
   tagline: string;

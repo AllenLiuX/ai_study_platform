@@ -53,6 +53,10 @@ export interface AgentFormProps {
   submitError: string | null;
 }
 
+/** 把任意输入转成合法的 agent_key slug (a-z0-9_-)。
+ *  中文 / 非 ASCII 字符会全部被过滤,此时返回空 — 调用方需要自行兜底
+ *  (常见做法:走后端 LLM 生成的 spec.agent_key,或用 u-<timestamp> fallback)。
+ */
 function normalizeKey(input: string): string {
   return input
     .toLowerCase()
@@ -60,7 +64,15 @@ function normalizeKey(input: string): string {
     .replace(/[^a-z0-9_\-\s]/g, "")
     .trim()
     .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[_\-]+|[_\-]+$/g, "")
     .slice(0, 64);
+}
+
+/** 当 display_name 是纯中文 / normalizeKey 返回空时,生成一个 u-<时间戳后 6 位> 的占位 key。 */
+function fallbackKey(): string {
+  const suffix = String(Date.now() % 1_000_000).padStart(6, "0");
+  return `u_${suffix}`;
 }
 
 export function AgentForm({
@@ -159,7 +171,11 @@ export function AgentForm({
       setDomainsText(spec.domains.join(", "));
       setTier(spec.suggested_model_tier);
       if (!isEdit && keyAutoFilled) {
-        setAgentKey(normalizeKey(spec.display_name));
+        // Phase 5: 优先用 LLM 给的英文 slug,server 端已 sanitize 过;
+        // 退而求其次用 display_name 转化,最后兜底 u_<timestamp>
+        const llmKey = normalizeKey(spec.agent_key || "");
+        const nameKey = normalizeKey(spec.display_name);
+        setAgentKey(llmKey || nameKey || fallbackKey());
       }
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : "生成失败,请重试");
@@ -266,9 +282,14 @@ export function AgentForm({
             id="display_name"
             value={displayName}
             onChange={(e) => {
-              setDisplayName(e.target.value);
+              const v = e.target.value;
+              setDisplayName(v);
               if (!isEdit && keyAutoFilled) {
-                setAgentKey(normalizeKey(e.target.value));
+                // 用户手填 display_name:能 normalize 出 slug 就用;否则保留已有 key
+                // (避免一边打字一边把已有 key 抹掉)
+                const next = normalizeKey(v);
+                if (next) setAgentKey(next);
+                else if (!agentKey) setAgentKey(fallbackKey());
               }
             }}
             placeholder="例如:量化系统设计老师"
