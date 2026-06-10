@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import logging
+
+from fastapi import APIRouter, Depends, Query
 
 from ..core.auth import CurrentUser, get_current_user
 from ..db import repos
 from ..schemas.student import (
+    DailyTasksResponse,
     DashboardResponse,
     StudentProfile,
     StudentProfileUpdate,
     Subject,
     SubjectProgress,
 )
+from ..services.task_planner import get_or_generate_today_tasks
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/student", tags=["student"])
 
@@ -82,6 +88,15 @@ async def get_progress(
     return _build_subject_progress(user.id, subjects)
 
 
+@router.get("/tasks/today", response_model=DailyTasksResponse)
+async def get_today_tasks(
+    refresh: bool = Query(False, description="强制重新生成,忽略当天缓存"),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """今日 3 件事:点开即学,基于真实进度生成。"""
+    return await get_or_generate_today_tasks(user.id, force_refresh=refresh)
+
+
 @router.get("/dashboard", response_model=DashboardResponse)
 async def get_dashboard(
     user: CurrentUser = Depends(get_current_user),
@@ -90,9 +105,18 @@ async def get_dashboard(
     subjects = repos.list_subjects()
     recent_sessions = repos.list_sessions(user.id, limit=5)
     progress = _build_subject_progress(user.id, subjects)
+
+    # tasks 嵌入 dashboard 单次拉取,失败不影响主响应
+    tasks_payload: dict | None = None
+    try:
+        tasks_payload = await get_or_generate_today_tasks(user.id, force_refresh=False)
+    except Exception as exc:
+        logger.warning("dashboard 拉今日任务失败: %s", exc)
+
     return {
         "profile": profile,
         "subjects": subjects,
         "recent_sessions": recent_sessions,
         "progress": progress,
+        "tasks": tasks_payload,
     }

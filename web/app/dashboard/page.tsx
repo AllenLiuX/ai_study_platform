@@ -1,47 +1,25 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import { HeadTeacherCard } from "@/components/HeadTeacherCard";
 import { RecentSessionsCard } from "@/components/RecentSessionsCard";
 import { StudentHeader } from "@/components/StudentHeader";
 import { SubjectProgressCard } from "@/components/SubjectProgressCard";
-import { TaskCard, type TaskCardData } from "@/components/TaskCard";
+import { TaskCard } from "@/components/TaskCard";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AGENTS, AGENT_ORDER } from "@/lib/agents";
 import { chatApi, metaApi, studentApi } from "@/lib/api";
-import type { AgentType } from "@/lib/types";
-
-const PLACEHOLDER_TASKS: TaskCardData[] = [
-  {
-    title: "和班主任聊聊本周怎么安排",
-    description:
-      "5 分钟同步一下你这周的考试 / 作业,班主任会帮你列出每天 1-2 件最重要的事。",
-    subject: "学习规划",
-    estimatedMinutes: 5,
-    tag: "必做",
-  },
-  {
-    title: "找数学老师讲一个最近卡住的知识点",
-    description: "从一道题切入,我们一步一步把这一类题型搞清楚。",
-    subject: "数学",
-    estimatedMinutes: 20,
-    tag: "薄弱",
-  },
-  {
-    title: "找英语老师做一段语法或阅读训练",
-    description: "可以丢一句不会的句子给我,也可以发一段阅读题。",
-    subject: "英语",
-    estimatedMinutes: 15,
-    tag: "复习",
-  },
-];
+import type { AgentType, DailyTask } from "@/lib/types";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const dashboardQuery = useQuery({
     queryKey: ["dashboard"],
     queryFn: studentApi.getDashboard,
@@ -57,11 +35,26 @@ export default function DashboardPage() {
     ? `${models.default} · ${models.premium} · ${models.embedding}`
     : undefined;
 
+  const refreshTasks = useMutation({
+    mutationFn: () => studentApi.getTodayTasks(true),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["dashboard"], (old: typeof dashboardQuery.data) =>
+        old ? { ...old, tasks: data } : old,
+      );
+    },
+  });
+
   useEffect(() => {
     if (dashboardQuery.data?.profile.onboarding_completed === false) {
       router.replace("/onboarding");
     }
   }, [dashboardQuery.data, router]);
+
+  const tasksPayload = dashboardQuery.data?.tasks;
+  const tasks = useMemo<DailyTask[]>(
+    () => tasksPayload?.tasks ?? [],
+    [tasksPayload],
+  );
 
   async function enterAgent(type: AgentType) {
     try {
@@ -73,6 +66,20 @@ export default function DashboardPage() {
       router.push(`/chat/${session.id}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : "无法创建对话,请稍后再试");
+    }
+  }
+
+  async function startTask(task: DailyTask) {
+    try {
+      const session = await chatApi.createSession({
+        agent_type: task.agent_type,
+        subject_id: task.subject_id ?? null,
+        title: task.title.slice(0, 20),
+      });
+      const promptParam = encodeURIComponent(task.starter_prompt);
+      router.push(`/chat/${session.id}?prompt=${promptParam}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "无法开始任务,请稍后再试");
     }
   }
 
@@ -92,26 +99,56 @@ export default function DashboardPage() {
             />
 
             <section className="space-y-3">
-              <SectionTitle
-                title="今日推荐任务"
-                hint="Phase 0 占位 · 算法将在 Phase 3 接入"
-              />
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-lg font-semibold tracking-tight">
+                  今日推荐任务
+                </h2>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>
+                    {tasksPayload?.model ? (
+                      <>
+                        AI 班主任 ·{" "}
+                        <span className="font-mono">{tasksPayload.model}</span>{" "}
+                        基于你的进度生成
+                      </>
+                    ) : tasks.length > 0 ? (
+                      "新用户默认清单 · 多聊几轮后会按你的薄弱点重新生成"
+                    ) : (
+                      "稍候,AI 正在为你规划"
+                    )}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => refreshTasks.mutate()}
+                    disabled={refreshTasks.isPending}
+                  >
+                    {refreshTasks.isPending ? (
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    换一组
+                  </Button>
+                </div>
+              </div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {PLACEHOLDER_TASKS.map((t, idx) => (
-                  <TaskCard
-                    key={idx}
-                    task={t}
-                    onClick={() => {
-                      // 第一张任务卡片是班主任,后面的对应学科
-                      const map: AgentType[] = [
-                        "head_teacher",
-                        "math_teacher",
-                        "english_teacher",
-                      ];
-                      enterAgent(map[idx] ?? "head_teacher");
-                    }}
-                  />
-                ))}
+                {tasks.length === 0 ? (
+                  <>
+                    <Skeleton className="h-40" />
+                    <Skeleton className="h-40" />
+                    <Skeleton className="h-40" />
+                  </>
+                ) : (
+                  tasks.map((t) => (
+                    <TaskCard
+                      key={t.id}
+                      task={t}
+                      modelLabel={tasksPayload?.model ?? undefined}
+                      onClick={() => startTask(t)}
+                    />
+                  ))
+                )}
               </div>
             </section>
 

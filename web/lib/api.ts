@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatSession,
   Citation,
+  DailyTasksResponse,
   DashboardResponse,
   FollowUp,
   Material,
@@ -112,6 +113,10 @@ export const studentApi = {
     }),
   getSubjects: () => request<Subject[]>("/api/student/subjects"),
   getDashboard: () => request<DashboardResponse>("/api/student/dashboard"),
+  getTodayTasks: (refresh = false) =>
+    request<DailyTasksResponse>(
+      `/api/student/tasks/today${refresh ? "?refresh=true" : ""}`,
+    ),
 };
 
 // -----------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams, useRouter } from "next/navigation";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentSidebar } from "@/components/AgentSidebar";
 import { AppHeader } from "@/components/AppHeader";
@@ -31,6 +31,7 @@ export default function ChatSessionPage() {
   const params = useParams<{ sessionId: string }>();
   const sessionId = params.sessionId;
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
 
   const sessionsQuery = useQuery({
@@ -176,6 +177,37 @@ export default function ChatSessionPage() {
   function stop() {
     abortRef.current?.abort();
   }
+
+  // Phase 3:从 Dashboard 任务卡过来时,URL 带 ?prompt=xxx → 自动发送一次
+  const autoPromptedRef = useRef(false);
+  useEffect(() => {
+    if (autoPromptedRef.current) return;
+    if (!sessionId || isStreaming) return;
+    if (messagesQuery.isLoading) return; // 等历史消息加载完再判断
+    const promptParam = searchParams?.get("prompt");
+    if (!promptParam) return;
+    // 仅当当前会话还没有用户消息时才自动发送 (避免刷新二次触发)
+    const hasUserMsg = (messagesQuery.data ?? []).some((m) => m.role === "user");
+    if (hasUserMsg) {
+      // 已经有用户消息,清掉 query 即可
+      router.replace(`/chat/${sessionId}`);
+      autoPromptedRef.current = true;
+      return;
+    }
+    autoPromptedRef.current = true;
+    const decoded = decodeURIComponent(promptParam);
+    // 先清 URL,再发送,避免 send 过程中的 re-render 重复触发
+    router.replace(`/chat/${sessionId}`);
+    void send(decoded);
+  }, [
+    sessionId,
+    isStreaming,
+    messagesQuery.isLoading,
+    messagesQuery.data,
+    searchParams,
+    router,
+    send,
+  ]);
 
   // 会话不存在时,跳回 dashboard
   if (sessionsQuery.data && !session) {

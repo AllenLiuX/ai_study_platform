@@ -1,11 +1,18 @@
 "use client";
 
-import { Library, LogOut, Sparkles } from "lucide-react";
+import {
+  Library,
+  Loader2,
+  LogOut,
+  MessageSquare,
+  Sparkles,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { chatApi } from "@/lib/api";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +82,7 @@ export function AppHeader({ className }: AppHeaderProps) {
                 </Link>
               );
             })}
+            <ChatNavButton active={pathname?.startsWith("/chat") ?? false} />
           </nav>
         </div>
 
@@ -91,5 +99,59 @@ export function AppHeader({ className }: AppHeaderProps) {
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * "对话" tab:点击后跳到最近一条 session;若没有任何 session,
+ * 默认创建一个 head_teacher 会话再跳进去 (相当于"开始第一次对话")。
+ */
+function ChatNavButton({ active }: { active: boolean }) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+
+  async function go() {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const sessions = await chatApi.listSessions();
+      const latest = sessions[0]; // 后端已按 updated_at desc 排序
+      if (latest) {
+        router.push(`/chat/${latest.id}`);
+      } else {
+        const created = await chatApi.createSession({
+          agent_type: "head_teacher",
+          subject_id: null,
+        });
+        router.push(`/chat/${created.id}`);
+      }
+    } catch (err) {
+      console.error("[ChatNav] 跳转失败", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={go}
+      disabled={loading}
+      className={cn(
+        "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition",
+        active
+          ? "bg-primary/10 text-primary"
+          : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+        loading && "cursor-wait opacity-70",
+      )}
+      title="跳到最近的对话"
+    >
+      {loading ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <MessageSquare className="h-3.5 w-3.5" />
+      )}
+      对话
+    </button>
   );
 }

@@ -61,8 +61,29 @@ class SubjectProgress(BaseModel):
     weak_points: list[WeakPoint] = Field(default_factory=list)
 
 
+class DailyTask(BaseModel):
+    id: str
+    title: str
+    description: str
+    subject_label: str
+    subject_id: str | None = None
+    agent_type: str
+    estimated_minutes: int = 15
+    tag: str
+    starter_prompt: str
+    knowledge_point_ids: list[str] = Field(default_factory=list)
+
+
+class DailyTasksResponse(BaseModel):
+    tasks: list[DailyTask] = Field(default_factory=list)
+    generated_at: datetime | None = None
+    model: str | None = None
+    cached: bool = False
+
+
 class DashboardResponse(BaseModel):
     profile: StudentProfile
     subjects: list[Subject]
     recent_sessions: list[dict] = Field(default_factory=list)
     progress: list[SubjectProgress] = Field(default_factory=list)
+    tasks: DailyTasksResponse | None = None

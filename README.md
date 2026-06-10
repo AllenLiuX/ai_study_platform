@@ -89,9 +89,24 @@
 - [x] **前端**:`SubjectProgressCard` 接真实 mastery / 当前章节 / 薄弱点;每张卡底部用 `<Sparkles>` 标注「由 gpt-4o-mini 分析对话生成」
 - [x] `scripts/phase2_smoke.py`:12 项断言,验证完整 chain (对话 → BackgroundTask 抽取 → progress 更新 → dashboard 真实数据 → head_teacher 不抽取)
 
+### Phase 3 — 今日推荐任务 ✅
+
+每天打开 App,Dashboard 顶部都是 3 条「点开就能学」的任务,基于学生真实进度由 AI 班主任规划 — 学生不用再自己想"今天该做什么",直接点卡片 → 自动进入对话 → 第一句话已经发给老师。
+
+- [x] DB schema ([0004_phase3_daily_tasks.sql](supabase/migrations/0004_phase3_daily_tasks.sql)):`student_daily_tasks` 表 (student_id × date 唯一) + jsonb tasks + 生成上下文快照 + RLS (只读自己,写仅 service_role)
+- [x] **任务规划服务** ([task_planner.py](api/app/services/task_planner.py)):`gpt-4o-mini` + JSON mode,基于学生画像 / 各学科 progress / 薄弱点 / 最近 7 天对话痕迹生成 3 条任务
+- [x] **多样性约束**:至少 1 条 `规划` (head_teacher),覆盖 ≥ 2 个学科,薄弱学科优先排第 1;后端校验 + 校正不合格输出
+- [x] **任务结构**:title / description / subject_label / agent_type / estimated_minutes / tag (薄弱·复习·新学·规划) / **starter_prompt**(学生第一人称口语)/ knowledge_point_ids
+- [x] **缓存策略**:按学生+日期 upsert,同一天多次刷新走缓存(避免重复烧 token);`?refresh=true` 强制重新生成;新用户走兜底任务集
+- [x] **API**:`GET /api/student/tasks/today` 独立可用;`/api/student/dashboard` 顺带返回 tasks (单次拉取,首屏一次到底)
+- [x] **前端 Dashboard**:`TaskCard` 替换 Phase 0 的占位 — 真实任务、颜色区分 tag、显示 `gpt-4o-mini` 模型水印、"换一组"按钮一键 refresh
+- [x] **一键开始任务**:点击任务卡 → `chatApi.createSession(agent_type)` → 跳到 `/chat/<id>?prompt=<starter>` → chat 页检测 query 后**自动发送 starter_prompt**(仅首次,清掉 URL 防重)
+- [x] **顶部"对话" tab**:`AppHeader` 加入「对话」入口,点击跳到最近一条 session;没有对话时为该学生即时创建一个 head_teacher 会话再进入
+- [x] `scripts/phase3_smoke.py`:**22 项断言**,验证 shape / 幂等 / `refresh=true` 推进 updated_at / dashboard.tasks 一致 / 有 progress 后任务包含多学科 + 至少 1 个 head_teacher + model 字段非空
+
 ### 后续 Phase Roadmap
 
-- **Phase 3 — 任务系统 + 学习报告**:基于 `student_progress` 的薄弱点和 encounter 历史,LLM 生成"今日推荐任务"(替换 Dashboard 占位);周报告聚合最近 7 天的学习节奏 / 掌握度变化
+- **Phase 3.5 — 周/月学习报告**:聚合最近 7/30 天的学习节奏 + 掌握度变化曲线 + AI 生成总结(发送给家长前置)
 - **Phase 4 — 多模态**:图片(题目拍照)/ 手写公式 / 语音输入
 - **Phase 5 — 管理端 + 家长端**:平台公共资料管理 UI、学生列表/对话日志、家长视角周报、内容安全审核
 
@@ -104,7 +119,7 @@
 | 前端 | Next.js 14 (App Router) + TypeScript + Tailwind + 自写 shadcn 组件 + TanStack Query + `@supabase/ssr` |
 | 后端 | FastAPI + Pydantic + httpx + OpenAI SDK + `supabase-py` |
 | 数据库 | Supabase Postgres (含 Auth / Storage / pgvector) |
-| AI | OpenAI:`gpt-4o-mini` 默认 + `gpt-4o` 关键场景 + `text-embedding-3-small` (Phase 1) + `gpt-4o-mini` JSON mode 抽取学习进度 (Phase 2) |
+| AI | OpenAI:`gpt-4o-mini` 默认 + `gpt-4o` 关键场景 + `text-embedding-3-small` (Phase 1) + `gpt-4o-mini` JSON mode 抽取学习进度 (Phase 2) + `gpt-4o-mini` JSON mode 生成每日任务 (Phase 3) |
 | 部署 (后续) | Vercel (前端) + Railway/Render/自建 (后端) |
 
 ---
@@ -121,9 +136,11 @@ flowchart TB
   FastAPI -->|"Chat / Embedding / JSON 抽取"| OpenAI["OpenAI API<br/>gpt-4o-mini / 4o"]
   SupabaseDB -->|"top-k cosine"| RAG["Material Chunks<br/>pgvector HNSW"]
   SupabaseDB -->|"knowledge_points<br/>+ student_progress"| Progress["学习进度<br/>(Phase 2)"]
+  SupabaseDB -->|"student_daily_tasks"| Tasks["今日推荐任务<br/>(Phase 3)"]
   Browser -->|"upload PDF/MD"| Storage["Supabase Storage<br/>materials/"]
   FastAPI -.->|"BackgroundTasks<br/>parse → chunk → embed"| Storage
   FastAPI -.->|"BackgroundTasks<br/>抽取 KP + 更新 mastery"| Progress
+  FastAPI -.->|"gpt-4o-mini JSON<br/>规划 3 件事"| Tasks
 ```
 
 ---
@@ -157,6 +174,7 @@ student_coach/
     phase15_smoke.py                # Phase 1.5 (公共资料) 后端冒烟
     phase2_smoke.py                 # Phase 2 (学习进度) 后端冒烟
     phase25_smoke.py                # Phase 2.5 (follow-up 引导) 后端冒烟
+    phase3_smoke.py                 # Phase 3 (今日推荐任务) 后端冒烟
     frontend_smoke.py               # 前端路由 + 中间件冒烟
     apply_migration.py              # psycopg 直连应用任意 .sql migration
     generate_knowledge_notes.py     # Phase 1.5: 基于课标生成 AI 讲义
@@ -177,7 +195,7 @@ student_coach/
       main.py
       core/                # config / auth / llm
       routes/              # chat / students / materials / health
-      services/            # chat_service / parser / chunker / embedding / retrieval / material_processor
+      services/            # chat_service / parser / chunker / embedding / retrieval / material_processor / progress_extractor / suggester / task_planner
       agents/              # registry + 四个 prompt 文件 + runtime
       db/                  # supabase_client + repos
       schemas/             # Pydantic 模型 (含 material)
@@ -199,6 +217,7 @@ student_coach/
    - [supabase/migrations/0001_phase0_init.sql](supabase/migrations/0001_phase0_init.sql) — 基础表 + RLS
    - [supabase/migrations/0002_phase1_materials.sql](supabase/migrations/0002_phase1_materials.sql) — 资料库 + pgvector + Storage 桶
    - [supabase/migrations/0003_phase2_progress.sql](supabase/migrations/0003_phase2_progress.sql) — 知识点树 + student_progress + 聚合 RPC
+   - [supabase/migrations/0004_phase3_daily_tasks.sql](supabase/migrations/0004_phase3_daily_tasks.sql) — 今日推荐任务缓存 + RLS
    - [supabase/seed.sql](supabase/seed.sql) — 数学/英语/语文三个学科种子
 4. 在项目根目录跑 `cd api && source .venv/bin/activate && python ../scripts/seed_knowledge_points.py` 入库知识点树
 5. (可选) `Authentication → Providers → Email` 中,本地开发可以关闭 "Confirm email" 让注册更顺;生产环境务必打开

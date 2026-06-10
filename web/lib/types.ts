@@ -90,11 +90,35 @@ export interface SubjectProgress {
   weak_points: WeakPoint[];
 }
 
+// Phase 3: 今日推荐任务
+export type DailyTaskTag = "薄弱" | "复习" | "新学" | "规划";
+
+export interface DailyTask {
+  id: string;
+  title: string;
+  description: string;
+  subject_label: string;
+  subject_id: string | null;
+  agent_type: AgentType;
+  estimated_minutes: number;
+  tag: DailyTaskTag | string;
+  starter_prompt: string;
+  knowledge_point_ids: string[];
+}
+
+export interface DailyTasksResponse {
+  tasks: DailyTask[];
+  generated_at: string | null;
+  model: string | null;
+  cached: boolean;
+}
+
 export interface DashboardResponse {
   profile: StudentProfile;
   subjects: Subject[];
   recent_sessions: ChatSession[];
   progress: SubjectProgress[];
+  tasks: DailyTasksResponse | null;
 }
 
 // Phase 1: 学习资料 (上传到 Supabase Storage,后端切片+向量化后供 RAG 检索)
