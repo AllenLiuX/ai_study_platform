@@ -95,7 +95,7 @@ export function ModelSelector({
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-40 mb-1.5 w-[320px] max-w-[80vw] overflow-hidden rounded-xl border border-border bg-card shadow-card">
+        <div className="absolute right-0 top-full z-40 mt-1.5 w-[320px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-border bg-card shadow-card">
           <div className="border-b border-border/60 px-3 py-2 text-[11px] text-muted-foreground">
             选择本次对话使用的 AI 模型
           </div>
