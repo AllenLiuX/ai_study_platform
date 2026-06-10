@@ -13,3 +13,9 @@ pypdf>=4.3.0
 tiktoken>=0.7.0
 # Phase 1.5: 平台公共资料生成 (读取课标 yaml)
 PyYAML>=6.0
+# Phase 4.1: 扫描版 PDF / 图片资料 → 视觉提取
+#   pypdfium2 是纯 Python wheel,无需安装 poppler 等系统依赖
+#   只用它把 PDF 每页渲染为 PNG,再喂给 OpenAI vision 提取文字 + 公式
+#   Pillow 用来把 pypdfium2 的 bitmap 转 PNG 字节流
+pypdfium2>=4.30.0
+Pillow>=10.0.0

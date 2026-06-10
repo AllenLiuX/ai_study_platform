@@ -158,6 +158,30 @@
 
 > 用法:对话里点 🖼️ 或者直接 Ctrl+V 粘贴一张题目截图,加一句"这道题怎么做?"→ AI 老师就能看图分步骤讲解,RAG 资料引用照样可叠加。
 
+### Phase 4.1 — 资料库视觉提取(扫描版 PDF / 图片走 OCR)✅
+
+把 Phase 4 的视觉能力下推到资料库,解决两个老痛点:
+1. 扫描版 PDF / 图片型 PDF 之前 `pypdf` 抽不到字 → 直接 `parse_status='failed'`,资料无法进 RAG
+2. 图片格式(题目卡 / 板书 / 错题截图)以前在 route 层就被 reject,根本传不上来
+
+- **`vision_extractor.py`**:基于 `pypdfium2` + `Pillow` + OpenAI vision(LOW 档 `gpt-5.4-mini`)。
+  - 单图 → 一次 vision 调用,输出 markdown(公式自动转 LaTeX,表格保留)
+  - PDF → 每页用 `pypdfium2` 渲染成 PNG(scale ≈ 192 dpi,长边 ≤ 2000 px 控 token),`asyncio.Semaphore(4)` 并发 OCR 后拼接;超过 20 页只 OCR 前 20 页并 warn
+  - 系统 prompt 明确"忠实抽取、不评论、看不清写 `[模糊]`、几何图描述一句",避免幻觉
+  - `temperature=0`,确定性输出
+- **`parser.EmptyPdfTextError`**:`pypdf` 抽空时不再直接抛 `ValueError`,而是抛这个软错误(仍是 `ValueError` 子类,向后兼容)。`material_processor._extract_text` 捕获后自动走 vision OCR。
+- **`material_processor._extract_text`**:统一抽取入口,按 kind 分派——
+  - `text` → 老路径 `parser.parse_bytes`
+  - `pdf` → `parser.parse_bytes` → `EmptyPdfTextError` 兜底走 `vision_extractor.extract_pdf_via_vision`
+  - `image`(新)→ 直接 `vision_extractor.extract_image`
+  - 最终都返回 `ParseResult`,后续 chunk + embed + 落库流程不变
+- **`detect_kind` 扩展**:`SUPPORTED_MIME_TYPES` 加 `image/png|jpeg|webp|gif`,扩展名同步,大小写兼容(`.PNG` 也认)
+- **Route**:`POST /api/materials` 放行 image/* mime,与 chat-attachments 一致(均 ≤20MB)
+- **`MaterialUploader.tsx`**:`accept` 加图片类型,提示文案改"PDF / TXT / Markdown / 图片 · 扫描件和图片走视觉提取"
+- **`scripts/phase41_smoke.py`**:7 项断言(`detect_kind` 9 例 / `EmptyPdfTextError` 继承 / 空白 PDF 触发软错误 / pypdfium2 渲染 PNG / image dispatch / PDF 抽空 dispatch / text 不触碰 vision);**E2E 真打 OpenAI** 用 PIL 合成 `OCR test 123 + x^2 = 4` 图,验证模型正确返回 `OCR test 123 + $x^2 = 4$`(公式自动 LaTeX)
+
+> 用法:在 `/materials` 直接拖一张题目卡 / 板书照 / 扫描版讲义 PDF → 后台几秒后变 `ready` → 对话时勾选这份资料,数学老师就能引用图里的公式回答。成本:单张图约 $0.0008,20 页 PDF 约 $0.016。
+
 ### 后续 Phase Roadmap
 
 - **Phase 5 — 学习报告 + 任务闭环**:聚合最近 7/30 天的学习节奏 + 掌握度变化曲线 + AI 生成总结(发送给家长前置);今日任务加 `pending/in_progress/completed` 状态 + 班主任对话尾问"今天的任务完成了吗"

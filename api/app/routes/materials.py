@@ -64,10 +64,11 @@ async def upload_material(
 
     mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
     detected = parser.detect_kind(mime, file.filename)
-    if detected not in {"pdf", "text"}:
+    # Phase 4.1: 在 PDF/text 之外接受图片 — 走 vision_extractor 提取 markdown
+    if detected not in {"pdf", "text", "image"}:
         raise HTTPException(
             status_code=400,
-            detail="目前仅支持 PDF / TXT / Markdown,后续会扩展更多类型",
+            detail="目前支持 PDF / TXT / Markdown / 图片 (PNG/JPG/WEBP/GIF)",
         )
 
     data = await file.read()

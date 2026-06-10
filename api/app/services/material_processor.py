@@ -2,6 +2,12 @@
 
 被 FastAPI BackgroundTasks 调用,生命周期与请求解耦。
 小文件 (典型教辅 PDF < 20MB) 处理时间在 5-30 秒之间,前端轮询 parse_status 即可。
+
+Phase 4.1 起,对图片资料 / 扫描版 PDF 增加 vision 兜底:
+- text:                 parser.parse_bytes
+- pdf:                  pypdf 先抽;抽空 → vision_extractor.extract_pdf_via_vision
+- image (新支持):       直接 vision_extractor.extract_image
+最终结果统一为 ParseResult,后续 chunk/embed 流程不变。
 """
 
 from __future__ import annotations
@@ -11,7 +17,7 @@ import logging
 
 from ..db import repos
 from ..db.supabase_client import get_admin_client
-from . import parser, chunker, embedding
+from . import chunker, embedding, parser, vision_extractor
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +27,45 @@ STORAGE_BUCKET = "materials"
 def _download_bytes(storage_path: str) -> bytes:
     client = get_admin_client()
     return client.storage.from_(STORAGE_BUCKET).download(storage_path)
+
+
+async def _extract_text(
+    *, data: bytes, mime_type: str, filename: str
+) -> parser.ParseResult:
+    """统一抽取入口,按 kind 分派 text / pdf+fallback / image+vision。"""
+    kind = parser.detect_kind(mime_type, filename)
+
+    # 图片 → 直接 vision OCR
+    if kind == "image":
+        logger.info("vision extracting image (%s, %d bytes)", filename, len(data))
+        text = await vision_extractor.extract_image(data=data, mime=mime_type)
+        return parser.ParseResult(
+            text=text,
+            char_count=len(text),
+            page_count=1,
+            detected_kind="image+vision",
+        )
+
+    # PDF → 先 pypdf,抽空就 vision 兜底
+    if kind == "pdf":
+        try:
+            return parser.parse_bytes(
+                data=data, mime_type=mime_type, filename=filename
+            )
+        except parser.EmptyPdfTextError as exc:
+            logger.info(
+                "PDF text-empty (%s), falling back to vision OCR — %s", filename, exc
+            )
+            text = await vision_extractor.extract_pdf_via_vision(data)
+            return parser.ParseResult(
+                text=text,
+                char_count=len(text),
+                page_count=None,
+                detected_kind="pdf+vision",
+            )
+
+    # text / 其他 → 老路径
+    return parser.parse_bytes(data=data, mime_type=mime_type, filename=filename)
 
 
 async def process_material(material_id: str) -> None:
@@ -38,7 +83,7 @@ async def process_material(material_id: str) -> None:
 
     try:
         data = await asyncio.to_thread(_download_bytes, material["storage_path"])
-        result = parser.parse_bytes(
+        result = await _extract_text(
             data=data,
             mime_type=material.get("mime_type") or "",
             filename=material.get("original_filename") or "",

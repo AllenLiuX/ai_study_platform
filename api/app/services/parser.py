@@ -1,13 +1,12 @@
 """文件解析:把上传文件的字节流提取为纯文本。
 
-Phase 1 支持的类型:
-- application/pdf  (`pypdf`)
+支持的类型:
+- application/pdf  (`pypdf`,扫描版抽不到字时上层会兜底走 vision)
 - text/plain      (utf-8 解码)
 - text/markdown   (utf-8 解码)
+- image/*         (Phase 4.1:占位 — 实际抽取走 services.vision_extractor)
 
-后续可扩展:
-- application/vnd.openxmlformats-officedocument.wordprocessingml.document (python-docx)
-- image/*  (OCR,例如 paddleocr / vision API)
+`detect_kind` 返回 'pdf' / 'text' / 'image' / None。
 """
 
 from __future__ import annotations
@@ -28,6 +27,12 @@ SUPPORTED_MIME_TYPES: dict[str, str] = {
     "text/x-markdown": "text",
     # 浏览器对 .md 经常吐空 mime,后端补一个回退
     "application/octet-stream": "binary",
+    # Phase 4.1: 图片资料 (题目卡 / 板书 / 错题截图)
+    "image/png": "image",
+    "image/jpeg": "image",
+    "image/jpg": "image",
+    "image/webp": "image",
+    "image/gif": "image",
 }
 
 
@@ -36,7 +41,17 @@ SUPPORTED_EXTENSIONS: dict[str, str] = {
     "txt": "text",
     "md": "text",
     "markdown": "text",
+    "png": "image",
+    "jpg": "image",
+    "jpeg": "image",
+    "webp": "image",
+    "gif": "image",
 }
+
+
+class EmptyPdfTextError(ValueError):
+    """pypdf 抽不到任何可读文本(扫描版 / 图片型 PDF)。
+    上层捕获后会触发 vision OCR 兜底。"""
 
 
 @dataclass(slots=True)
@@ -48,9 +63,9 @@ class ParseResult:
 
 
 def detect_kind(mime_type: str, filename: str) -> str | None:
-    """返回 'pdf' / 'text' / None。
+    """返回 'pdf' / 'text' / 'image' / None。
 
-    优先看 MIME,fallback 看扩展名。返回 None 表示当前 Phase 不支持。
+    优先看 MIME,fallback 看扩展名。返回 None 表示完全不支持。
     """
     mime = (mime_type or "").lower().split(";")[0].strip()
     kind = SUPPORTED_MIME_TYPES.get(mime)
@@ -67,16 +82,25 @@ def detect_kind(mime_type: str, filename: str) -> str | None:
 def parse_bytes(*, data: bytes, mime_type: str, filename: str) -> ParseResult:
     """解析文件字节流。返回纯文本与元信息。
 
-    若类型不支持或解析失败,抛 ValueError(由上层捕获写入 parse_status='failed')。
+    类型不支持抛 ValueError;PDF 抽空抛 EmptyPdfTextError;
+    其他解析失败也抛 ValueError(由上层捕获写入 parse_status='failed')。
+
+    注意:image 类型这里不做实际抽取 — vision 调用是 async,
+    必须由上层 `material_processor` 直接 await `vision_extractor`。
+    这个函数遇到 image kind 会抛 `NotImplementedError`,以示信号。
     """
     kind = detect_kind(mime_type, filename)
     if kind == "pdf":
         return _parse_pdf(data)
     if kind == "text":
         return _parse_text(data)
+    if kind == "image":
+        raise NotImplementedError(
+            "image 类型必须由上层走 vision_extractor (异步),不应进入 parse_bytes"
+        )
     raise ValueError(
         f"暂不支持的文件类型: mime={mime_type!r}, filename={filename!r}。"
-        "目前仅支持 PDF / TXT / Markdown。"
+        "目前支持 PDF / TXT / Markdown / 图片 (PNG/JPG/WEBP/GIF)。"
     )
 
 
@@ -98,9 +122,9 @@ def _parse_pdf(data: bytes) -> ParseResult:
 
     full = "\n\n".join(page_texts).strip()
     if not full:
-        raise ValueError(
-            "PDF 中没有提取到可读文本,可能是扫描件或图片型 PDF。"
-            "Phase 1 暂不做 OCR,后续会补。"
+        # 上层会捕获 EmptyPdfTextError → 走 vision_extractor 兜底
+        raise EmptyPdfTextError(
+            "PDF 中没有提取到可读文本,可能是扫描件或图片型 PDF;将走视觉提取兜底。"
         )
     return ParseResult(
         text=full,
