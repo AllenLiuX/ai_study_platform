@@ -235,11 +235,22 @@ export default function ChatSessionPage() {
     send,
   ]);
 
-  // 会话不存在时,跳回 dashboard
-  if (sessionsQuery.data && !session) {
+  // 会话不存在时回退 dashboard — 只有 sessionsQuery 真的拉完了 (非首屏 / 非 fetching)
+  // 且确认列表里没有这个 id 时才跳。否则会因为 stale cache 误判,把刚从 Dashboard 创建
+  // 后跳过来的新会话错误地踢回 dashboard,造成"点了任务又跳回当前页"。
+  useEffect(() => {
+    if (!sessionsQuery.isFetched) return;
+    if (sessionsQuery.isFetching) return;
+    if (!sessionsQuery.data) return;
+    if (session) return;
     router.replace("/dashboard");
-    return null;
-  }
+  }, [
+    sessionsQuery.isFetched,
+    sessionsQuery.isFetching,
+    sessionsQuery.data,
+    session,
+    router,
+  ]);
 
   const loading = messagesQuery.isLoading || sessionsQuery.isLoading;
 

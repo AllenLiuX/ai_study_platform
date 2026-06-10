@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AGENTS, AGENT_ORDER } from "@/lib/agents";
 import { chatApi, metaApi, studentApi } from "@/lib/api";
-import type { AgentType, DailyTask } from "@/lib/types";
+import type { AgentType, ChatSession, DailyTask } from "@/lib/types";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -64,16 +64,27 @@ export default function DashboardPage() {
 
   async function openSession(
     key: string,
-    factory: () => Promise<{ id: string; queryAppend?: string }>,
+    factory: () => Promise<{ session: ChatSession; queryAppend?: string }>,
   ) {
     if (creatingRef.current) return; // 防双点
     creatingRef.current = key;
     setCreatingKey(key);
     setOpenError(null);
     try {
-      const { id, queryAppend } = await factory();
+      const { session, queryAppend } = await factory();
+      // *** 关键 ***:立即把新 session 写入 react-query 的 ["chat-sessions"] 缓存。
+      // 否则 chat 页 mount 时 sessionsQuery.data 还是 stale list (没有新 session),
+      // 触发 "session 不存在 → router.replace('/dashboard')",造成"点了又跳回当前页"。
+      queryClient.setQueryData<ChatSession[]>(["chat-sessions"], (prev) => {
+        const list = prev ?? [];
+        return [session, ...list.filter((s) => s.id !== session.id)];
+      });
+      // 异步刷新一次,保证后续 dashboard / sidebar 数据同步
+      void queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+      // 同时占位 messages cache (新 session 的 welcome 消息会由 chat 页 fetch 拿到完整版本)
+      queryClient.setQueryData(["chat-messages", session.id], []);
       // push 之后我们不主动清 creatingKey — 让 spinner 持续到新页加载完(避免闪烁)
-      router.push(`/chat/${id}${queryAppend ?? ""}`);
+      router.push(`/chat/${session.id}${queryAppend ?? ""}`);
     } catch (err) {
       creatingRef.current = null;
       setCreatingKey(null);
@@ -90,7 +101,7 @@ export default function DashboardPage() {
         agent_type: type,
         subject_id: agent.subjectId,
       });
-      return { id: session.id };
+      return { session };
     });
   }
 
@@ -102,7 +113,7 @@ export default function DashboardPage() {
         title: task.title.slice(0, 20),
       });
       return {
-        id: session.id,
+        session,
         queryAppend: `?prompt=${encodeURIComponent(task.starter_prompt)}`,
       };
     });
