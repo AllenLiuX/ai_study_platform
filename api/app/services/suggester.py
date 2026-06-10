@@ -19,7 +19,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..agents.registry import AgentConfig
-from ..core.llm import ModelTier, get_client, resolve_model
+from ..core.llm import ModelTier, build_chat_kwargs, get_client, resolve_model
 from ..db import repos
 
 logger = logging.getLogger(__name__)
@@ -151,13 +151,15 @@ async def suggest_follow_ups(
         client = get_client()
         model = resolve_model(ModelTier.LOW)  # 后台跟进建议:用最便宜的 tier
         resp = await client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            temperature=0.6,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
+            **build_chat_kwargs(
+                model=model,
+                response_format={"type": "json_object"},
+                temperature=0.6,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+            ),
         )
         content = resp.choices[0].message.content or "{}"
         data = json.loads(content)

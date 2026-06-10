@@ -24,7 +24,7 @@ import logging
 import pypdfium2 as pdfium
 from PIL import Image  # noqa: F401 — pypdfium2.PdfBitmap.to_pil 隐式依赖 Pillow
 
-from ..core.llm import ModelTier, get_client, resolve_model
+from ..core.llm import ModelTier, build_chat_kwargs, get_client, resolve_model
 
 logger = logging.getLogger(__name__)
 
@@ -112,9 +112,11 @@ async def _ocr_single_image(png_bytes: bytes, *, mime: str = "image/png") -> str
         },
     ]
     resp = await client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0,
+        **build_chat_kwargs(
+            model=model,
+            messages=messages,
+            temperature=0,
+        ),
     )
     return (resp.choices[0].message.content or "").strip()
 

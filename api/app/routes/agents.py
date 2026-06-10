@@ -11,7 +11,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from openai import APIError as OpenAIAPIError
 
 from ..core.auth import CurrentUser, get_current_user
-from ..core.llm import ModelTier, get_client, resolve_model
+from ..core.llm import ModelTier, build_chat_kwargs, get_client, resolve_model
 from ..db import repos
 from ..schemas.agent import (
     CreateUserAgentRequest,
@@ -193,13 +193,15 @@ async def generate_agent_spec(
     model = resolve_model(ModelTier.MEDIUM)
     try:
         resp = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _GEN_AGENT_SYSTEM},
-                {"role": "user", "content": user_msg},
-            ],
-            temperature=0.5,
-            response_format={"type": "json_object"},
+            **build_chat_kwargs(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _GEN_AGENT_SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+                temperature=0.5,
+                response_format={"type": "json_object"},
+            ),
         )
     except OpenAIAPIError as exc:
         logger.warning("generate agent spec failed: %s", exc)

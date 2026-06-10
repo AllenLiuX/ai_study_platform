@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from ..core.llm import ModelTier, get_client, resolve_model
+from ..core.llm import ModelTier, build_chat_kwargs, get_client, resolve_model
 from ..db import repos
 from ..db.supabase_client import get_admin_client
 
@@ -89,13 +89,15 @@ async def _call_llm(*, subject_name: str, user_msg: str, assistant_msg: str, kps
     )
     model = resolve_model(ModelTier.LOW)  # 后台抽取:用最便宜的 tier 控制开销
     resp = await client.chat.completions.create(
-        model=model,
-        response_format={"type": "json_object"},
-        temperature=0.0,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
+        **build_chat_kwargs(
+            model=model,
+            response_format={"type": "json_object"},
+            temperature=0.0,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        ),
     )
     content = resp.choices[0].message.content or "{}"
     try:

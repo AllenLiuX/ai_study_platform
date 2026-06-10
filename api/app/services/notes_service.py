@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import HTTPException
 from openai import APIError as OpenAIAPIError
 
-from ..core.llm import ModelTier, get_client, resolve_model
+from ..core.llm import ModelTier, build_chat_kwargs, get_client, resolve_model
 from ..db import repos
 from ..db.supabase_client import get_admin_client
 
@@ -138,13 +138,15 @@ async def generate_note_from_message(
     model = resolve_model(ModelTier.MEDIUM)
     try:
         resp = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _NOTE_SYSTEM},
-                {"role": "user", "content": transcript},
-            ],
-            temperature=0.3,
-            response_format={"type": "json_object"},
+            **build_chat_kwargs(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _NOTE_SYSTEM},
+                    {"role": "user", "content": transcript},
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"},
+            ),
         )
     except OpenAIAPIError as exc:
         logger.warning("generate note llm failed: %s", exc)

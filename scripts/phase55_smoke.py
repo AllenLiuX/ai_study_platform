@@ -214,11 +214,13 @@ async def main() -> None:
                 class completions:
                     @staticmethod
                     async def create(**kwargs):
+                        # temperature 在 reasoning 模型上会被 build_chat_kwargs 剔除,
+                        # 用 .get() 兼容
                         return await fake_create(
                             kwargs["model"],
                             kwargs["messages"],
-                            kwargs["temperature"],
-                            kwargs["response_format"],
+                            kwargs.get("temperature"),
+                            kwargs.get("response_format"),
                         )
 
         with patch.object(notes_service, "get_client", return_value=FakeClient):

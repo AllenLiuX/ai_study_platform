@@ -31,7 +31,7 @@ from datetime import date
 from typing import Any
 
 from ..agents.registry import all_agents
-from ..core.llm import ModelTier, get_client, resolve_model
+from ..core.llm import ModelTier, build_chat_kwargs, get_client, resolve_model
 from ..db import repos
 from ..db.supabase_client import get_admin_client
 
@@ -285,13 +285,15 @@ async def _call_llm(*, system_prompt: str, user_prompt: str) -> dict:
     # 今日任务规划每天每人最多 1 次 LLM 调用,用 MEDIUM 保证质量
     model = resolve_model(ModelTier.MEDIUM)
     resp = await client.chat.completions.create(
-        model=model,
-        response_format={"type": "json_object"},
-        temperature=0.7,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        **build_chat_kwargs(
+            model=model,
+            response_format={"type": "json_object"},
+            temperature=0.7,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        ),
     )
     content = resp.choices[0].message.content or "{}"
     try:

@@ -171,10 +171,85 @@ def list_tiers() -> list[dict]:
     ]
 
 
-# 推理模型 (o1/o3 系列) 不接受 temperature 参数,这里集中判断
-def _is_reasoning_model(model: str) -> bool:
-    m = model.lower()
-    return m.startswith("o1") or m.startswith("o3") or m.startswith("o4")
+# =============================================================================
+# Reasoning 模型识别 + 安全 kwargs 构造
+# =============================================================================
+# 2026 年起,OpenAI 把绝大多数主力模型都改成 reasoning 模型 (内部 CoT)。
+# Reasoning 模型不接受经典 sampling 参数 (temperature / top_p / presence_penalty
+# / frequency_penalty),传了会被 API 拒绝:
+#     "Unsupported parameter: 'temperature' is not supported with this model"
+#
+# 已知 reasoning 模型 (持续扩充,以前缀匹配为主):
+#   - o1 / o3 / o4 系列      ("o1-preview", "o3-mini", ...)
+#   - GPT-5 系列            ("gpt-5", "gpt-5-mini", "gpt-5-nano",
+#                            "gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-5.5-pro")
+#   - 例外: "gpt-5-chat-latest" 是老 chat 模型变体,支持 temperature
+#
+# 工程实践:所有 chat.completions.create() 都用 build_chat_kwargs() 构造参数,
+# 让 reasoning 模型自动剔除 temperature,避免每个调用点都判断。
+# =============================================================================
+
+
+def is_reasoning_model(model: str) -> bool:
+    """判断模型是否为 reasoning 模型 (不接受 temperature 等 sampling 参数)。"""
+    m = (model or "").lower().strip()
+    if not m:
+        return False
+    if m.startswith(("o1", "o3", "o4")):
+        return True
+    if m.startswith("gpt-5"):
+        # gpt-5-chat-latest 是兼容老 chat 接口的变体,支持 temperature
+        return "chat" not in m
+    return False
+
+
+def build_chat_kwargs(
+    *,
+    model: str,
+    messages: list[dict],
+    stream: bool = False,
+    temperature: float | None = None,
+    response_format: dict | None = None,
+    **extra,
+) -> dict:
+    """组装 OpenAI chat.completions.create() 的 kwargs,自动适配 reasoning 模型。
+
+    - reasoning 模型: 静默丢弃 temperature / top_p / presence_penalty / frequency_penalty
+    - 其他参数 (response_format, max_tokens 等) 原样透传
+    - 任何 reasoning 模型不接受的 extra kwargs 也会被剔除
+    """
+    reasoning = is_reasoning_model(model)
+    kwargs: dict = {"model": model, "messages": messages, "stream": stream}
+
+    if not reasoning and temperature is not None:
+        kwargs["temperature"] = temperature
+
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+
+    # 已知 reasoning 模型不接受的 sampling 参数,统一过滤
+    _BLOCKED_FOR_REASONING = {
+        "top_p",
+        "presence_penalty",
+        "frequency_penalty",
+        "logit_bias",
+        "logprobs",
+        "top_logprobs",
+    }
+    for k, v in extra.items():
+        if reasoning and k in _BLOCKED_FOR_REASONING:
+            continue
+        # max_tokens 在 reasoning 模型上需要改名为 max_completion_tokens
+        if reasoning and k == "max_tokens":
+            kwargs["max_completion_tokens"] = v
+            continue
+        kwargs[k] = v
+    return kwargs
+
+
+# 历史保留 — 部分内部代码可能在用
+def _is_reasoning_model(model: str) -> bool:  # pragma: no cover
+    return is_reasoning_model(model)
 
 
 def _chat_create_kwargs(
@@ -184,10 +259,9 @@ def _chat_create_kwargs(
     temperature: float,
     stream: bool,
 ) -> dict:
-    kwargs: dict = {"model": model, "messages": messages, "stream": stream}
-    if not _is_reasoning_model(model):
-        kwargs["temperature"] = temperature
-    return kwargs
+    return build_chat_kwargs(
+        model=model, messages=messages, stream=stream, temperature=temperature
+    )
 
 
 async def stream_chat(
