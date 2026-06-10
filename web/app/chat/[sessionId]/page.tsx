@@ -108,18 +108,24 @@ export default function ChatSessionPage() {
   }, [messagesQuery.data, optimisticMessages]);
 
   const send = useCallback(
-    async (content: string, options: { materialIds?: string[] } = {}) => {
+    async (
+      content: string,
+      options: { materialIds?: string[]; imagePaths?: string[] } = {},
+    ) => {
       if (!sessionId || isStreaming) return;
       const effectiveMaterialIds = options.materialIds ?? selectedMaterialIds;
+      const effectiveImagePaths = options.imagePaths ?? [];
+
+      const localMeta: ChatMessage["metadata"] = {};
+      if (effectiveMaterialIds.length) localMeta.material_ids = effectiveMaterialIds;
+      if (effectiveImagePaths.length) localMeta.image_urls = effectiveImagePaths;
 
       const localUserMsg: ChatMessage = {
         session_id: sessionId,
         role: "user",
         content,
         created_at: new Date().toISOString(),
-        metadata: effectiveMaterialIds.length
-          ? { material_ids: effectiveMaterialIds }
-          : undefined,
+        metadata: Object.keys(localMeta).length ? localMeta : undefined,
       };
       setOptimisticMessages((prev) => [...prev, localUserMsg]);
       setStreamingText("");
@@ -175,6 +181,7 @@ export default function ChatSessionPage() {
           {
             materialIds: effectiveMaterialIds,
             modelTier: selectedTier ?? undefined,
+            imageUrls: effectiveImagePaths.length ? effectiveImagePaths : undefined,
           },
           ctrl.signal,
         );
@@ -311,7 +318,7 @@ export default function ChatSessionPage() {
           <ChatInput
             agent={agent}
             disabled={isStreaming || !sessionId}
-            onSend={(text) => send(text)}
+            onSend={(text, imagePaths) => send(text, { imagePaths })}
             onStop={stop}
             showStarters={messages.length <= 1 && !isStreaming}
             picker={

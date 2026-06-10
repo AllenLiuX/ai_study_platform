@@ -91,6 +91,8 @@ export interface ChatMessage {
     model?: string;
     model_tier?: ModelTierId | string;
     follow_ups?: FollowUp[];
+    /** Phase 4: 题目图片附件 — 值是 chat-attachments bucket 中的 storage_path */
+    image_urls?: string[];
     [key: string]: unknown;
   };
   created_at?: string | null;

@@ -137,11 +137,32 @@
 - 前端在 chat 页右上角加 **`ModelSelector` 紧凑下拉**:展示当前 tier · model · 能力/开销 dot meter,选中后 `localStorage` 按 agent type 记忆,下次进同类老师对话自动用上一次选择;SSE 消息体加 `model_tier` 字段。
 - 推理类模型(`o*` 系列)自动跳过 `temperature` 参数,避免 API 报错。
 
+### Phase 4 — 图片对话(拍照传题) ✅
+
+让学生看不懂题目时直接拍照,数学/英语/语文老师"看图讲题"。
+
+- **Storage 隔离** ([0005_phase4_chat_images.sql](supabase/migrations/0005_phase4_chat_images.sql)):新建 private bucket `chat-attachments`,RLS 让学生只能读写 `chat-attachments/<own_uid>/`,后端 service_role 拉对象转 base64 inline 喂给 OpenAI vision。
+- **后端 `POST /api/chat/attachments`**:学生多文件上传,校验 mime / 5MB / png+jpeg+webp+gif → Storage 落 `<uid>/<uuid>.<ext>` → 返回 `storage_path`(无独立 DB row,图片信息全挂在 `chat_messages.metadata.image_urls`)。
+- **`SendMessageRequest.image_urls`**:学生发消息时把多张图的 storage_path 一并带上;后端写库前过滤掉非本 uid 路径,防猜路径越权。
+- **多模态历史** ([chat_service.py](api/app/services/chat_service.py)):`_enrich_history_with_images` 把整段历史里所有带 `metadata.image_urls` 的 user msg 都拉对象、转 `data:image/...;base64,...` URL,以一个内存 cache 复用避免重复下载;多轮对话里之前的图仍能被模型"看见"。
+- **`agent runtime build_messages`**:对带 `_image_data_urls` 的 user msg 把 content 拼成 OpenAI vision 期望的 `[{text}, {image_url}, ...]` array,5 档模型(`gpt-5.4-mini` → `gpt-5.5-pro`,`o3`)全部走 vision 路径;assistant / 无图 user 仍是纯字符串,反推理模型(`o*`)的 `temperature` 跳过逻辑沿用。
+- **前端 `ChatInput`**:
+  - 输入框左侧加 ImagePlus 按钮,文件 picker(`accept=image/*` + multiple)
+  - **拖拽**到输入框任意区域 / **粘贴**(`Ctrl+V` 截图)都能直接添加图
+  - 缩略图 16×16 横排,上传中转圈、失败红边、hover 出 X 按钮可移除
+  - 限制 ≤ 3 张 / 单张 ≤ 5MB,触发限制 inline 红条提示 4s 自动消失
+  - 文字可留空(默认带"帮我看看这道题"占位),Enter 直接发图;有图未传完时 Send 按钮变 spinner 阻止发送
+- **前端 `ChatWindow`**:user 气泡内部上方渲染 24×24 缩略图,点击在新 tab 打开大图;`ChatMessageImages` hook 自动用 Supabase Signed URL(1h 有效)拉显示,刷新页面也能回看
+- **`lib/api.ts`**:`chatApi.uploadAttachment(file)` + `chatApi.getAttachmentSignedUrl(path)`;`sendMessageStream` 加 `imageUrls` option
+- **`scripts/phase4_smoke.py`**:5 项断言,验证 storage upload → download → base64 转换 → history enrich → multimodal `build_messages` 全链路通畅
+
+> 用法:对话里点 🖼️ 或者直接 Ctrl+V 粘贴一张题目截图,加一句"这道题怎么做?"→ AI 老师就能看图分步骤讲解,RAG 资料引用照样可叠加。
+
 ### 后续 Phase Roadmap
 
-- **Phase 4 — 周/月学习报告**:聚合最近 7/30 天的学习节奏 + 掌握度变化曲线 + AI 生成总结(发送给家长前置)
-- **Phase 5 — 多模态**:图片(题目拍照)/ 手写公式 / 语音输入
-- **Phase 6 — 管理端 + 家长端**:平台公共资料管理 UI、学生列表/对话日志、家长视角周报、内容安全审核
+- **Phase 5 — 学习报告 + 任务闭环**:聚合最近 7/30 天的学习节奏 + 掌握度变化曲线 + AI 生成总结(发送给家长前置);今日任务加 `pending/in_progress/completed` 状态 + 班主任对话尾问"今天的任务完成了吗"
+- **Phase 6 — 作业辅导深化**:题目分步引导 prompt(不直接给答案、先问卡在哪一步) + 错因分类(概念/公式/审题/计算/方法/表达) + 错题本工作流
+- **Phase 7 — 管理端 + 家长端**:平台公共资料管理 UI、学生列表/对话日志、家长视角周报、内容安全审核、防沉迷使用时长提醒
 
 ---
 
@@ -171,7 +192,9 @@ flowchart TB
   SupabaseDB -->|"knowledge_points<br/>+ student_progress"| Progress["学习进度<br/>(Phase 2)"]
   SupabaseDB -->|"student_daily_tasks"| Tasks["今日推荐任务<br/>(Phase 3)"]
   Browser -->|"upload PDF/MD"| Storage["Supabase Storage<br/>materials/"]
+  Browser -->|"拍照传题 (Phase 4)"| ChatImg["Supabase Storage<br/>chat-attachments/"]
   FastAPI -.->|"BackgroundTasks<br/>parse → chunk → embed"| Storage
+  FastAPI -.->|"download → base64<br/>OpenAI vision input"| ChatImg
   FastAPI -.->|"BackgroundTasks<br/>抽取 KP + 更新 mastery"| Progress
   FastAPI -.->|"gpt-4o-mini JSON<br/>规划 3 件事"| Tasks
 ```

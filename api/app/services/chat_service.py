@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import logging
 from typing import AsyncIterator
@@ -19,6 +21,64 @@ from .retrieval import RetrievedChunk, format_context, retrieve_chunks
 from .suggester import suggest_follow_ups
 
 logger = logging.getLogger(__name__)
+
+# Phase 4: 拼 OpenAI vision data URL 用
+_CHAT_BUCKET = "chat-attachments"
+_MIME_BY_EXT = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "gif": "image/gif",
+}
+
+
+async def _load_attachment_data_url(storage_path: str) -> str | None:
+    """从 chat-attachments bucket 拉对象,转 data:image/...;base64,xxx URL。
+
+    OpenAI vision 接受这种 inline data URL,免去把 storage 暴露成 public URL。
+    失败返回 None(让上层跳过,不打断对话)。
+    """
+    client = get_admin_client()
+    try:
+        data = await asyncio.to_thread(
+            lambda: client.storage.from_(_CHAT_BUCKET).download(storage_path)
+        )
+    except Exception as exc:
+        logger.warning("load attachment failed: %s (%s)", storage_path, exc)
+        return None
+    if not data:
+        return None
+    ext = storage_path.rsplit(".", 1)[-1].lower() if "." in storage_path else "png"
+    mime = _MIME_BY_EXT.get(ext, "image/png")
+    b64 = base64.b64encode(data).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
+async def _enrich_history_with_images(history: list[dict]) -> list[dict]:
+    """对 history 中每条带 metadata.image_urls 的 user msg,挂上临时字段
+    `_image_data_urls`(base64 data URL 列表)。返回新 list,不改原对象。
+
+    多轮对话里历史图片也会被一并 base64,确保模型在第 N 轮提问时还"看得见"
+    之前贴的题目。生产中如果想压缩开销,可改成仅最近 K 条带图。
+    """
+    cache: dict[str, str | None] = {}
+    out: list[dict] = []
+    for msg in history:
+        m = dict(msg)
+        md = m.get("metadata") or {}
+        paths = md.get("image_urls") or []
+        if paths and m.get("role") == "user":
+            data_urls: list[str] = []
+            for p in paths:
+                if p not in cache:
+                    cache[p] = await _load_attachment_data_url(p)
+                if cache[p]:
+                    data_urls.append(cache[p])  # type: ignore[arg-type]
+            if data_urls:
+                m["_image_data_urls"] = data_urls
+        out.append(m)
+    return out
 
 
 def _default_session_title(agent: AgentConfig) -> str:
@@ -91,6 +151,7 @@ async def stream_assistant_reply(
     student_profile: dict | None,
     background_tasks: BackgroundTasks | None = None,
     model_tier: str | None = None,
+    image_urls: list[str] | None = None,
 ) -> AsyncIterator[str]:
     """流式生成 assistant 回复。
 
@@ -110,14 +171,26 @@ async def stream_assistant_reply(
     user_meta: dict = {}
     if material_ids:
         user_meta["material_ids"] = material_ids
+    if image_urls:
+        # 校验图片归属:必须以 <user_id>/ 起头,防有人猜路径
+        user_meta["image_urls"] = [
+            p for p in image_urls if isinstance(p, str) and p.startswith(f"{user_id}/")
+        ]
+    # 纯图无文字时给个占位 — chat_messages.content 是 NOT NULL,且前端做了
+    # 默认占位,这里再兜一道,避免边角 case 触发 db 校验失败
+    safe_content = user_content
+    if not (safe_content and safe_content.strip()) and user_meta.get("image_urls"):
+        safe_content = "（图片）"
     repos.insert_message(
         session_id=session_id,
         role="user",
-        content=user_content,
+        content=safe_content,
         metadata=user_meta or None,
     )
 
-    history = repos.list_messages(session_id)
+    raw_history = repos.list_messages(session_id)
+    # 多模态历史:有图片的 user msg 挂上 base64 data URL,后续 build_messages 用得到
+    history = await _enrich_history_with_images(raw_history)
 
     assistant_text_parts: list[str] = []
     citations: list[RetrievedChunk] = []

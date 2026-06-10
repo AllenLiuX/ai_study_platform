@@ -10,10 +10,11 @@ import {
   Sparkles,
   User,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { AGENTS } from "@/lib/agents";
+import { chatApi } from "@/lib/api";
 import type {
   AgentType,
   ChatMessage,
@@ -213,6 +214,8 @@ function MessageBubble({
   const agent = AGENTS[agentType];
   const citations =
     (message.metadata?.citations as Citation[] | undefined) ?? [];
+  const imagePaths =
+    (message.metadata?.image_urls as string[] | undefined) ?? [];
   const isPlaceholder =
     isStreaming && (message.content === "正在思考…" || message.content === "");
   const messageModel =
@@ -244,6 +247,9 @@ function MessageBubble({
             : "border border-border bg-card shadow-card",
         )}
       >
+        {isUser && imagePaths.length > 0 && (
+          <ChatMessageImages paths={imagePaths} />
+        )}
         {isPlaceholder ? (
           <span className="inline-flex items-center gap-1.5 text-muted-foreground">
             <Sparkles className="h-3.5 w-3.5 text-primary" />
@@ -276,6 +282,59 @@ function MessageBubble({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Phase 4: 题目图片缩略图 — 自动用 signed URL 拉取并显示 */
+function ChatMessageImages({ paths }: { paths: string[] }) {
+  const [urls, setUrls] = useState<(string | null)[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    setUrls(paths.map(() => null));
+    Promise.all(paths.map((p) => chatApi.getAttachmentSignedUrl(p))).then(
+      (arr) => {
+        if (mounted) setUrls(arr);
+      },
+    );
+    return () => {
+      mounted = false;
+    };
+  }, [paths]);
+
+  return (
+    <div className="mb-2 flex flex-wrap gap-2">
+      {paths.map((p, i) => {
+        const url = urls[i];
+        return (
+          <a
+            key={p}
+            href={url ?? undefined}
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              "block h-24 w-24 overflow-hidden rounded-lg border bg-background",
+              "border-white/30 hover:border-white/60 transition",
+            )}
+            title={url ? "点击查看大图" : "图片加载中"}
+          >
+            {url ? (
+              // 用 native img 而不是 next/image,signed URL 太多 host 不好配置
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={url}
+                alt="题目截图"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-primary-foreground/70">
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </div>
+            )}
+          </a>
+        );
+      })}
     </div>
   );
 }

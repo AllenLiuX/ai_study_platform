@@ -1,14 +1,28 @@
-"""Chat 路由:会话与消息。"""
+"""Chat 路由:会话 / 消息 / 图片附件。"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+import asyncio
+import logging
+import mimetypes
+import uuid
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 
 from ..agents.registry import all_agents
 from ..core.auth import CurrentUser, get_current_user
 from ..db import repos
+from ..db.supabase_client import get_admin_client
 from ..schemas.chat import (
+    ChatAttachment,
     ChatMessage,
     ChatSession,
     CreateSessionRequest,
@@ -16,7 +30,14 @@ from ..schemas.chat import (
 )
 from ..services import chat_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+# Phase 4: 图片对话上限
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 单张图 5MB
+ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"}
+CHAT_BUCKET = "chat-attachments"
 
 
 @router.get("/agents")
@@ -57,6 +78,71 @@ async def list_session_messages(
     return chat_service.list_messages(session_id, user.id)
 
 
+@router.post("/attachments", response_model=ChatAttachment)
+async def upload_chat_attachment(
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(get_current_user),
+) -> ChatAttachment:
+    """学生上传一张题目图片 (Phase 4)。
+
+    - 校验 mime / size
+    - 写入 Storage bucket `chat-attachments/<user_id>/<uuid>.<ext>`
+    - 返回 storage_path,前端拿到后塞到 send_message 的 image_urls 里
+    - 不创建独立 DB row;图片信息只挂在 chat_messages.metadata.image_urls
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名缺失")
+    mime = (file.content_type or mimetypes.guess_type(file.filename)[0] or "").lower()
+    if mime not in ALLOWED_IMAGE_MIMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"图片格式不支持:{mime or 'unknown'};仅支持 PNG/JPG/WEBP/GIF",
+        )
+    data = await file.read()
+    size_bytes = len(data)
+    if size_bytes == 0:
+        raise HTTPException(status_code=400, detail="文件为空")
+    if size_bytes > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"图片过大 ({size_bytes/1024/1024:.1f}MB),单张上限 {MAX_IMAGE_BYTES // 1024 // 1024}MB",
+        )
+
+    # 选扩展名:用 mime 推断,避免学生上传 "题目.JPG" 大小写不一致的问题
+    ext_map = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/webp": "webp",
+        "image/gif": "gif",
+    }
+    ext = ext_map.get(mime, "png")
+    storage_path = f"{user.id}/{uuid.uuid4()}.{ext}"
+
+    client = get_admin_client()
+    try:
+        await asyncio.to_thread(
+            lambda: client.storage.from_(CHAT_BUCKET).upload(
+                storage_path,
+                data,
+                file_options={"content-type": mime, "upsert": "false"},
+            )
+        )
+    except Exception as exc:
+        logger.exception("chat attachment upload to storage failed")
+        raise HTTPException(
+            status_code=502,
+            detail=f"上传到 Storage 失败: {exc}",
+        ) from exc
+
+    return ChatAttachment(
+        storage_path=storage_path,
+        mime_type=mime,
+        size_bytes=size_bytes,
+        original_filename=file.filename,
+    )
+
+
 @router.post("/sessions/{session_id}/messages")
 async def send_message(
     session_id: str,
@@ -84,6 +170,7 @@ async def send_message(
             student_profile=profile,
             background_tasks=background_tasks,
             model_tier=payload.model_tier,
+            image_urls=payload.image_urls,
         ),
         media_type="text/event-stream",
         headers={

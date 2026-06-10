@@ -47,3 +47,18 @@ class SendMessageRequest(BaseModel):
     # Phase 3.5: 学生可在对话里临时选择模型档位 (low/medium/high/extra_high/max)
     # None = 用 agent 默认 tier (= MEDIUM)
     model_tier: str | None = None
+    # Phase 4: 图片附件 (拍照传题)。每项是 chat-attachments bucket 内的 storage_path
+    # 形如 "<user_id>/<uuid>.png",后端会拉下来转 base64 inline 给 OpenAI vision
+    image_urls: list[str] | None = None
+
+
+class ChatAttachment(BaseModel):
+    """Phase 4: 上传图片的返回体。
+
+    storage_path 用于在 SendMessageRequest.image_urls 中复用。
+    """
+
+    storage_path: str
+    mime_type: str
+    size_bytes: int
+    original_filename: str

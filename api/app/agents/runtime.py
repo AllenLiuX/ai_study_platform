@@ -84,6 +84,22 @@ def build_messages(
         if role not in {"user", "assistant"}:
             continue
         content = msg.get("content") or ""
+        # Phase 4: 多模态 user 消息 — chat_service 提前在 msg 上挂了
+        # `_image_data_urls` (base64 data URL 列表),这里把 content 拼成 OpenAI
+        # vision 期望的 array 格式 [text + image_url{...}, ...]
+        image_data_urls: list[str] = (
+            msg.get("_image_data_urls") if role == "user" else None
+        ) or []
+        if image_data_urls:
+            parts: list[dict] = []
+            if content:
+                parts.append({"type": "text", "text": content})
+            for url in image_data_urls:
+                parts.append({"type": "image_url", "image_url": {"url": url}})
+            if not parts:
+                continue
+            messages.append({"role": role, "content": parts})
+            continue
         if not content:
             continue
         messages.append({"role": role, "content": content})

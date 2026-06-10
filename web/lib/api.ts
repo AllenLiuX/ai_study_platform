@@ -159,6 +159,14 @@ export const studentApi = {
 // -----------------------------------------------------------------------------
 // Chat
 // -----------------------------------------------------------------------------
+/** Phase 4: 图片附件上传返回结构 */
+export interface ChatAttachment {
+  storage_path: string;
+  mime_type: string;
+  size_bytes: number;
+  original_filename: string;
+}
+
 export const chatApi = {
   listSessions: () => request<ChatSession[]>("/api/chat/sessions"),
   createSession: (payload: {
@@ -172,6 +180,37 @@ export const chatApi = {
     }),
   listMessages: (sessionId: string) =>
     request<ChatMessage[]>(`/api/chat/sessions/${sessionId}/messages`),
+  /** Phase 4: 上传一张题目图片到 chat-attachments bucket,返回 storage_path */
+  uploadAttachment: async (file: File): Promise<ChatAttachment> => {
+    const token = await getAccessToken();
+    const form = new FormData();
+    form.set("file", file);
+    const resp = await fetch(`${API_BASE}/api/chat/attachments`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!resp.ok) {
+      let detail = `上传失败 ${resp.status}`;
+      try {
+        const body = await resp.json();
+        detail = body.detail ?? body.message ?? detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail);
+    }
+    return (await resp.json()) as ChatAttachment;
+  },
+  /** Phase 4: 给前端用,把 storage_path 转回 Storage 签名 URL 用于回显缩略图 */
+  getAttachmentSignedUrl: async (storagePath: string): Promise<string | null> => {
+    const supabase = createSupabaseBrowserClient();
+    const { data, error } = await supabase.storage
+      .from("chat-attachments")
+      .createSignedUrl(storagePath, 60 * 60); // 1h 有效,够长用于浏览
+    if (error || !data) return null;
+    return data.signedUrl;
+  },
 };
 
 // -----------------------------------------------------------------------------
@@ -236,6 +275,8 @@ export interface SendMessageOptions {
   materialIds?: string[];
   /** Phase 3.5: 学生临时选择的模型档位,后端会覆盖 agent 默认 tier */
   modelTier?: ModelTierId | null;
+  /** Phase 4: 题目图片附件,值是 chat-attachments bucket 内的 storage_path 列表 */
+  imageUrls?: string[];
 }
 
 export async function sendMessageStream(
@@ -252,6 +293,9 @@ export async function sendMessageStream(
   }
   if (options.modelTier) {
     body.model_tier = options.modelTier;
+  }
+  if (options.imageUrls && options.imageUrls.length > 0) {
+    body.image_urls = options.imageUrls;
   }
   const resp = await fetch(
     `${API_BASE}/api/chat/sessions/${sessionId}/messages`,
