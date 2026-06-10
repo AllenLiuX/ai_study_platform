@@ -1,6 +1,7 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
+import { Pencil, Sparkles } from "lucide-react";
+import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
 import type { StudentProfile } from "@/lib/types";
@@ -60,15 +61,25 @@ export function StudentHeader({ profile, modelStack }: StudentHeaderProps) {
             </p>
           )}
         </div>
-        {modelStack && (
-          <div className="rounded-2xl border border-primary/15 bg-primary/5 px-3 py-2 text-xs">
-            <div className="flex items-center gap-1.5 font-medium text-primary">
-              <Sparkles className="h-3.5 w-3.5" />
-              AI 学习栈
+        <div className="flex flex-col items-end gap-2">
+          <Link
+            href="/onboarding?edit=true"
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+            title="编辑昵称 / 学习者类型 / 重点科目 / 目标"
+          >
+            <Pencil className="h-3 w-3" />
+            编辑资料
+          </Link>
+          {modelStack && (
+            <div className="rounded-2xl border border-primary/15 bg-primary/5 px-3 py-2 text-xs">
+              <div className="flex items-center gap-1.5 font-medium text-primary">
+                <Sparkles className="h-3.5 w-3.5" />
+                AI 学习栈
+              </div>
+              <div className="mt-0.5 text-muted-foreground">{modelStack}</div>
             </div>
-            <div className="mt-0.5 text-muted-foreground">{modelStack}</div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </section>
   );

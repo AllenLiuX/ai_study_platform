@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Notebook,
   Sparkles,
+  UserCog,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -97,11 +98,16 @@ export function AppHeader({ className }: AppHeaderProps) {
           </nav>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {email && (
-            <span className="hidden text-sm text-muted-foreground sm:inline">
-              {email}
-            </span>
+            <Link
+              href="/onboarding?edit=true"
+              className="hidden items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm text-muted-foreground transition hover:bg-secondary hover:text-foreground sm:inline-flex"
+              title="编辑个人资料 / 学习者设定"
+            >
+              <UserCog className="h-3.5 w-3.5" />
+              <span className="max-w-[180px] truncate">{email}</span>
+            </Link>
           )}
           <Button variant="ghost" size="sm" onClick={handleLogout}>
             <LogOut className="mr-1 h-4 w-4" />

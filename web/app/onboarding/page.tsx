@@ -1,7 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -65,7 +67,20 @@ interface FormState {
 }
 
 export default function OnboardingPage() {
+  // Next 14 在静态导出时要求 useSearchParams 必须被 Suspense 边界包裹
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-app-gradient" />}>
+      <OnboardingInner />
+    </Suspense>
+  );
+}
+
+function OnboardingInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // ?edit=true:重新走 onboarding 编辑个人资料 (StudentHeader / AppHeader 的入口走这条)
+  // 没参数时:仅未 onboarded 用户能进,已完成的会被 redirect 回 dashboard
+  const isEditMode = searchParams?.get("edit") === "true";
   const [step, setStep] = useState<Step>(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +105,8 @@ export default function OnboardingPage() {
       try {
         const profile = await studentApi.getProfile();
         if (cancelled) return;
-        if (profile.onboarding_completed) {
+        // 已完成 onboarding 且没显式走编辑入口 → 不允许重走流程,直接回 dashboard
+        if (profile.onboarding_completed && !isEditMode) {
           router.replace("/dashboard");
           return;
         }
@@ -120,7 +136,7 @@ export default function OnboardingPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, isEditMode]);
 
   const isK12 = form.learner_type === "k12_student";
 
@@ -164,6 +180,8 @@ export default function OnboardingPage() {
         focus_subjects: isK12 ? form.focus_subjects : [],
         focus_domains: isK12 ? [] : form.focus_domains,
         learning_goal: form.learning_goal,
+        // 编辑模式:保持原有的 onboarding_completed(后端 PATCH 会保留旧值,这里不传也行,
+        // 显式 true 是为了首次 onboarding 一进就把这个 flag 置好)
         onboarding_completed: true,
       });
       router.replace("/dashboard");
@@ -178,8 +196,27 @@ export default function OnboardingPage() {
   return (
     <div className="min-h-screen bg-app-gradient">
       <div className="container max-w-2xl py-12">
+        {isEditMode && (
+          <Link
+            href="/dashboard"
+            className="mb-4 inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            返回驾驶舱
+          </Link>
+        )}
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">完善基础信息</h1>
+          <div>
+            <h1 className="text-xl font-semibold">
+              {isEditMode ? "编辑个人资料" : "完善基础信息"}
+            </h1>
+            {isEditMode && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                调整学习者类型 / 重点科目 / 关注领域 / 目标 — 保存后立即生效,
+                后续推荐任务与老师人设会跟着更新
+              </p>
+            )}
+          </div>
           <span className="text-sm text-muted-foreground">
             步骤 {step + 1} / 3
           </span>
@@ -478,13 +515,23 @@ export default function OnboardingPage() {
         )}
 
         <div className="mt-6 flex justify-between gap-3">
-          <Button
-            variant="outline"
-            onClick={() => setStep((s) => (s > 0 ? ((s - 1) as Step) : s))}
-            disabled={step === 0 || submitting}
-          >
-            上一步
-          </Button>
+          {step === 0 && isEditMode ? (
+            <Button
+              variant="outline"
+              onClick={() => router.replace("/dashboard")}
+              disabled={submitting}
+            >
+              取消
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => setStep((s) => (s > 0 ? ((s - 1) as Step) : s))}
+              disabled={step === 0 || submitting}
+            >
+              上一步
+            </Button>
+          )}
           {step < 2 ? (
             <Button
               size="lg"
@@ -499,7 +546,11 @@ export default function OnboardingPage() {
               onClick={handleSubmit}
               disabled={!canGoNext || submitting}
             >
-              {submitting ? "保存中…" : "开始学习 →"}
+              {submitting
+                ? "保存中…"
+                : isEditMode
+                  ? "保存修改"
+                  : "开始学习 →"}
             </Button>
           )}
         </div>
