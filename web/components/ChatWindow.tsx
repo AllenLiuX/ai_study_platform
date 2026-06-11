@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowDown,
   ArrowRight,
   BookOpen,
   Check,
@@ -16,7 +17,7 @@ import {
   User,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { resolveAgentMeta } from "@/lib/agents";
@@ -58,10 +59,42 @@ export function ChatWindow({
   const agent = resolveAgentMeta(agentType, dynamicAgents);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // 自动滚动只在用户"贴底"时生效:往上滚动即解除跟随,可自由查看历史;
+  // 滚回底部(或发新消息)自动恢复跟随。
+  const pinnedRef = useRef(true);
+  const [isPinned, setIsPinned] = useState(true);
+  const prevMsgCountRef = useRef(messages.length);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    pinnedRef.current = nearBottom;
+    setIsPinned(nearBottom);
+  }, []);
+
+  const jumpToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    pinnedRef.current = true;
+    setIsPinned(true);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, []);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    // 自己发了新消息 → 重新贴底跟随
+    const grew = messages.length > prevMsgCountRef.current;
+    prevMsgCountRef.current = messages.length;
+    if (grew && messages[messages.length - 1]?.role === "user") {
+      pinnedRef.current = true;
+      setIsPinned(true);
+    }
+    if (!pinnedRef.current) return;
+    // 用 instant 而不是 smooth:流式高频更新时 smooth 动画的中间态会被
+    // 误判为"用户往上滚了",导致跟随意外解除
+    el.scrollTop = el.scrollHeight;
   }, [messages, streamingText, streamingFollowUps]);
 
   // 最后一条 assistant 消息的索引 (用于决定在哪里渲染 follow_ups)
@@ -73,8 +106,13 @@ export function ChatWindow({
   })();
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
-      <div className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="h-full overflow-y-auto scrollbar-thin"
+      >
+        <div className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
         {messages.length === 0 && !isStreaming && (
           <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center shadow-card">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-foreground text-2xl text-background">
@@ -151,7 +189,33 @@ export function ChatWindow({
             )}
           </div>
         )}
+        </div>
       </div>
+
+      {/* 解除跟随后浮出"回到底部";生成中带进度提示 */}
+      {!isPinned && (
+        <button
+          type="button"
+          onClick={jumpToBottom}
+          className={cn(
+            "absolute bottom-4 left-1/2 z-10 -translate-x-1/2",
+            "flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5",
+            "text-xs text-muted-foreground shadow-md transition hover:text-foreground",
+          )}
+        >
+          {isStreaming ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              正在生成 · 回到底部
+            </>
+          ) : (
+            <>
+              <ArrowDown className="h-3 w-3" />
+              回到底部
+            </>
+          )}
+        </button>
+      )}
     </div>
   );
 }
