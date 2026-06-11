@@ -36,14 +36,21 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 _PLAN_SYSTEM = """你是 AI 学习平台的「练习规划助手」。
-学生指定了一个练习主题 + 时长 + 题量,你要给出一份简短的练习计划。
+学生指定了一个练习主题 + 时长 + 题量,你要设计一份**系统性的出题大纲**。
+后续系统会按这份大纲逐条出题,所以大纲质量直接决定练习的覆盖面。
 
 请输出 JSON,字段:
-- plan_markdown: 一段 markdown 简述(≤ 200 字)
+- plan_markdown: 一段 markdown 简述(≤ 250 字)
   · 这个主题适合用什么策略练
-  · 建议拆分成哪些子知识点 (3-6 个)
+  · 大纲的整体结构(哪几个维度,为什么这样拆)
   · 学生练完后能掌握什么
-- knowledge_points: 子知识点列表 (string[],3-6 个,出题时用)
+- knowledge_points: 子知识点大纲 (string[])
+  · 数量 = 用户消息里给的「建议知识点数」(严格遵守)
+  · **从基础到进阶排序**:概念理解 → 核心机制 → 设计权衡 → 实战综合
+  · **覆盖主题的不同维度**,互相不重叠。比如系统设计类主题应同时覆盖:
+    整体架构、核心数据结构/算法、一致性与正确性、性能与扩展、容错与运维、典型 trade-off
+  · 每条是一个可独立出题的具体知识点(8-20 字),不要太宽泛(如"系统设计")
+    也不要太窄(如"某个参数默认值")
 
 不要 markdown 代码块包裹,只输出纯 JSON。
 """
@@ -51,15 +58,21 @@ _PLAN_SYSTEM = """你是 AI 学习平台的「练习规划助手」。
 _QUESTION_SYSTEM_TEMPLATE = """你是 {agent_name}({agent_role})。
 正在带学生练习「{topic}」。
 
-你已经出过这些题(题目/答案/学生作答/对错;若有):
+已出过的题(题干摘要 + 知识点 + 对错):
 {history_block}
 
 现在请出第 {next_idx} 道题。
 
+**本题指定考察的知识点:「{target_kp}」**
+({target_reason})
+
 要求:
-- 题型必须从这里选:{kinds_csv}
+- 题目必须紧扣上面指定的知识点,不要偏到别的子方向
+- **严禁与已出题目重复或同质化**:不能复用相同的具体场景 / 指标 / 问法。
+  即使知识点相同,也必须换一个全新的角度(例如:换 概念辨析 / 机制原理 /
+  方案对比 / 故障分析 / 数值估算 / 真实案例 等不同切入方式)
+- 题型必须从这里选:{kinds_csv}(与最近几题错开,不要连续同一题型)
 - 难度:{difficulty_label}(1=入门 / 5=很难)
-- 知识点:从「{kp_csv}」里挑(可以是组合,可以是没出过的优先)
 - 题目要具体、可判定。不要空泛的"谈谈你对 XX 的看法"
 - 若是 mcq:严格 4 个选项,只有 1 个正确;选项要有迷惑性 (避免明显错误)
 - 若是 multi_mcq:4 个选项,2-3 个正确
@@ -230,10 +243,14 @@ async def _generate_plan(
 ) -> tuple[str, list[str]]:
     client = get_client()
     model = resolve_model(ModelTier(tier))
+    # 知识点数与题量挂钩:保证第一轮就能把大纲覆盖一遍,之后还有余量针对弱项深挖。
+    # 10 题 → 7 个知识点;20 题 → 12 个 (cap);5 题 → 4 个。
+    kp_count = max(3, min(12, round(target_question_count * 0.7)))
     user_msg = (
         f"主题:{topic}\n"
         f"时长:{target_minutes} 分钟\n"
         f"题量:{target_question_count} 题\n"
+        f"建议知识点数:{kp_count} 个\n"
         f"出题老师:{agent.display_name}({agent.role or ''})"
     )
     resp = await client.chat.completions.create(
@@ -251,7 +268,7 @@ async def _generate_plan(
     data = _safe_load_json(text)
     plan_md = str(data.get("plan_markdown") or "").strip()
     kps = [str(k).strip() for k in (data.get("knowledge_points") or []) if str(k).strip()]
-    return plan_md, kps[:10]
+    return plan_md, kps[:12]
 
 
 # =============================================================================
@@ -306,6 +323,73 @@ def _attempts_index(questions: list[dict]) -> dict[str, dict]:
     return out
 
 
+def _pick_target_kp(
+    session: dict,
+    history_questions: list[dict],
+    attempts_by_qid: dict[str, dict],
+) -> tuple[str, str, int]:
+    """程序侧强制轮转知识点,保证系统性覆盖 + 自适应深挖。
+
+    策略(按优先级):
+      1. 大纲里还有没出过题的知识点 → 按大纲顺序(基础→进阶)取第一个 [coverage]
+      2. 全覆盖后,有答错的知识点 → 取错误率最高的深挖 [deepen_weak]
+      3. 全对 → 取出题次数最少的升难度再练 [challenge]
+
+    返回 (knowledge_point, 给 LLM 的理由说明, 难度调整 -1/0/+1)。
+    """
+    kp_pool: list[str] = ((session.get("summary") or {}).get("knowledge_points_pool")) or []
+    if not kp_pool:
+        return (
+            session["topic"],
+            "本次练习没有预生成大纲,请自行选择一个与已出题目不同的子方向,保证覆盖面",
+            0,
+        )
+
+    # 每个大纲知识点的出题数 / 对错数(题目的 knowledge_points 取首个匹配大纲的)
+    asked: dict[str, int] = {kp: 0 for kp in kp_pool}
+    wrong: dict[str, int] = {kp: 0 for kp in kp_pool}
+    answered: dict[str, int] = {kp: 0 for kp in kp_pool}
+    for q in history_questions:
+        q_kps = [kp for kp in (q.get("knowledge_points") or []) if kp in asked]
+        att = attempts_by_qid.get(q["id"]) or {}
+        for kp in q_kps:
+            asked[kp] += 1
+            if att.get("is_correct") is not None and not att.get("skipped"):
+                answered[kp] += 1
+                if att["is_correct"] is False:
+                    wrong[kp] += 1
+
+    # 1. coverage:按大纲顺序补没出过的
+    for kp in kp_pool:
+        if asked[kp] == 0:
+            return (
+                kp,
+                "这是大纲中还没练过的知识点 — 本题用于完成第一轮系统性覆盖",
+                0,
+            )
+
+    # 2. deepen_weak:错误率最高(至少错过一次)
+    weak = sorted(
+        (kp for kp in kp_pool if wrong[kp] > 0),
+        key=lambda kp: (-(wrong[kp] / max(1, answered[kp])), asked[kp]),
+    )
+    if weak:
+        kp = weak[0]
+        return (
+            kp,
+            f"学生在这个知识点上答错过 {wrong[kp]} 次 — 请换一个全新角度帮 TA 巩固薄弱点",
+            -1,
+        )
+
+    # 3. challenge:全对,挑练得最少的升难度
+    kp = min(kp_pool, key=lambda k: asked[k])
+    return (
+        kp,
+        "学生此前全部答对 — 请提高难度,出一道更综合 / 更接近实战的题",
+        +1,
+    )
+
+
 async def _llm_generate_question(
     *,
     session: dict,
@@ -326,14 +410,13 @@ async def _llm_generate_question(
         session["difficulty_strategy"], history_correct
     )
 
-    kp_pool = ((session.get("summary") or {}).get("knowledge_points_pool")) or []
-    covered = set()
-    for q in history_questions:
-        for kp in q.get("knowledge_points") or []:
-            covered.add(kp)
-    uncovered = [k for k in kp_pool if k not in covered]
-    # 给 LLM 提示优先没碰过的子知识点;若都覆盖了,允许 LLM 自由发挥
-    kp_hint = uncovered or kp_pool or [session["topic"]]
+    # 程序侧强制指定本题考察的知识点(coverage → deepen_weak → challenge)
+    target_kp, target_reason, diff_adjust = _pick_target_kp(
+        session, history_questions, attempts_by_qid
+    )
+    if diff_adjust and session["difficulty_strategy"] == "adaptive":
+        difficulty = max(1, min(5, difficulty + diff_adjust))
+        diff_label = f"{difficulty}({target_reason.split(' — ')[0]},在自适应基线上调整)"
 
     history_block = _format_history_for_prompt(history_questions, attempts_by_qid)
 
@@ -343,9 +426,10 @@ async def _llm_generate_question(
         topic=session["topic"],
         history_block=history_block or "(还没出过题)",
         next_idx=next_idx,
+        target_kp=target_kp,
+        target_reason=target_reason,
         kinds_csv=", ".join(session["allowed_kinds"]),
         difficulty_label=diff_label,
-        kp_csv=", ".join(kp_hint),
     )
 
     client = get_client()
@@ -391,8 +475,9 @@ async def _llm_generate_question(
     diff = int(data.get("difficulty") or difficulty)
     diff = max(1, min(5, diff))
     kps = [str(k).strip() for k in (data.get("knowledge_points") or []) if str(k).strip()]
-    if not kps:
-        kps = kp_hint[:2]  # 兜底用提示的 kp
+    # 保证程序指定的 target_kp 一定在记录里 — 轮转计数和掌握度统计都靠它
+    if target_kp not in kps:
+        kps.insert(0, target_kp)
     hints = [
         str(h).strip()
         for h in (data.get("hints") or [])
@@ -415,21 +500,23 @@ async def _llm_generate_question(
 def _format_history_for_prompt(
     questions: list[dict], attempts_by_qid: dict[str, dict]
 ) -> str:
+    """给出题 LLM 看的历史:带题干摘要,这是避免重复出题的关键。"""
     if not questions:
         return ""
     parts = []
-    for q in questions[-6:]:  # 最近 6 道,避免 prompt 爆掉
+    for q in questions[-10:]:  # 最近 10 道(只放题干摘要,token 可控)
         attempt = attempts_by_qid.get(q["id"]) or {}
         verdict = (
             "✓ 答对"
             if attempt.get("is_correct") is True
-            else ("✗ 答错" if attempt.get("is_correct") is False else "(未答 / 简答待评)")
+            else ("✗ 答错" if attempt.get("is_correct") is False else "未答")
         )
         if attempt.get("skipped"):
-            verdict = "(跳过)"
+            verdict = "跳过"
         kp = ", ".join(q.get("knowledge_points") or []) or "-"
+        excerpt = re.sub(r"\s+", " ", q.get("prompt") or "").strip()[:90]
         parts.append(
-            f"- 第 {q['idx']} 题 [{q['kind']}, 难度 {q['difficulty']}, 知识点 {kp}]: {verdict}"
+            f"- 第 {q['idx']} 题 [{q['kind']}|难度{q['difficulty']}|{kp}|{verdict}] {excerpt}"
         )
     return "\n".join(parts)
 
