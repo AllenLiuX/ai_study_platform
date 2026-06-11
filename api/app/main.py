@@ -13,6 +13,7 @@ from .routes import chat as chat_route
 from .routes import health as health_route
 from .routes import materials as materials_route
 from .routes import notes as notes_route
+from .routes import practice as practice_route
 from .routes import students as students_route
 
 
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(materials_route.router, prefix="/api")
     app.include_router(agents_route.router, prefix="/api")
     app.include_router(notes_route.router, prefix="/api")
+    app.include_router(practice_route.router, prefix="/api")
 
     return app
 

@@ -452,3 +452,126 @@ def insert_note_chunks(rows: list[dict]) -> None:
 def delete_note_chunks(note_id: str) -> None:
     client = get_admin_client()
     client.table("knowledge_note_chunks").delete().eq("note_id", note_id).execute()
+
+
+# =============================================================================
+# Phase 6: 练习模块
+# =============================================================================
+
+
+def create_practice_session(owner_id: str, fields: dict[str, Any]) -> dict:
+    client = get_admin_client()
+    payload = {"owner_id": owner_id, **fields}
+    resp = client.table("practice_sessions").insert(payload).execute()
+    return (resp.data or [payload])[0]
+
+
+def get_practice_session(session_id: str, owner_id: str) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_sessions")
+        .select("*")
+        .eq("id", session_id)
+        .eq("owner_id", owner_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def list_practice_sessions(
+    owner_id: str,
+    *,
+    status: str | None = None,
+    limit: int = 30,
+) -> list[dict]:
+    client = get_admin_client()
+    q = (
+        client.table("practice_sessions")
+        .select("*")
+        .eq("owner_id", owner_id)
+        .order("started_at", desc=True)
+        .limit(limit)
+    )
+    if status:
+        q = q.eq("status", status)
+    resp = q.execute()
+    return resp.data or []
+
+
+def update_practice_session(
+    session_id: str, owner_id: str, fields: dict[str, Any]
+) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_sessions")
+        .update(fields)
+        .eq("id", session_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def delete_practice_session(session_id: str, owner_id: str) -> bool:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_sessions")
+        .delete()
+        .eq("id", session_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    return bool(resp.data)
+
+
+def insert_practice_question(fields: dict[str, Any]) -> dict:
+    client = get_admin_client()
+    resp = client.table("practice_questions").insert(fields).execute()
+    return (resp.data or [fields])[0]
+
+
+def get_practice_question(question_id: str) -> dict | None:
+    """注意:不做 owner 校验,调用方需要先校验 session 归属。"""
+    client = get_admin_client()
+    resp = (
+        client.table("practice_questions")
+        .select("*")
+        .eq("id", question_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def list_practice_questions(session_id: str) -> list[dict]:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_questions")
+        .select("*")
+        .eq("session_id", session_id)
+        .order("idx", desc=False)
+        .execute()
+    )
+    return resp.data or []
+
+
+def insert_practice_attempt(fields: dict[str, Any]) -> dict:
+    client = get_admin_client()
+    resp = client.table("practice_attempts").insert(fields).execute()
+    return (resp.data or [fields])[0]
+
+
+def list_practice_attempts(question_ids: list[str]) -> list[dict]:
+    if not question_ids:
+        return []
+    client = get_admin_client()
+    resp = (
+        client.table("practice_attempts")
+        .select("*")
+        .in_("question_id", question_ids)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return resp.data or []

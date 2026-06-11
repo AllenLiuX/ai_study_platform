@@ -2,22 +2,31 @@
 
 import { createSupabaseBrowserClient } from "./supabase/client";
 import type {
+  AttemptResult,
   ChatMessage,
   ChatSession,
   Citation,
   CreateNoteRequest,
+  CreatePracticeSessionRequest,
   CreateUserAgentRequest,
   DailyTasksResponse,
   DashboardResponse,
+  FinishSessionResponse,
   FollowUp,
   GeneratedAgentSpec,
+  HintResponse,
   KnowledgeNote,
   Material,
   MaterialType,
   ModelTierId,
   ModelTierInfo,
+  NextQuestionResponse,
+  PracticeQuestion,
+  PracticeSession,
+  PracticeSessionStatus,
   StudentProfile,
   Subject,
+  SubmitAttemptRequest,
   UpdateNoteRequest,
   UpdateUserAgentRequest,
   UserAgent,
@@ -340,6 +349,52 @@ export const notesApi = {
     request<KnowledgeNote>(`/api/notes/${id}/review`, {
       method: "POST",
       body: JSON.stringify({ score }),
+    }),
+};
+
+// -----------------------------------------------------------------------------
+// Phase 6: 练习模块
+// -----------------------------------------------------------------------------
+export const practiceApi = {
+  list: (opts: { status?: PracticeSessionStatus; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.status) params.set("status", opts.status);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return request<PracticeSession[]>(`/api/practice/sessions${qs ? `?${qs}` : ""}`);
+  },
+  get: (id: string) => request<PracticeSession>(`/api/practice/sessions/${id}`),
+  create: (payload: CreatePracticeSessionRequest) =>
+    request<PracticeSession>("/api/practice/sessions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 60_000, // LLM 生成 plan 可能慢
+    }),
+  delete: (id: string) =>
+    request<void>(`/api/practice/sessions/${id}`, { method: "DELETE" }),
+  listQuestions: (sessionId: string) =>
+    request<PracticeQuestion[]>(`/api/practice/sessions/${sessionId}/questions`),
+  nextQuestion: (sessionId: string) =>
+    request<NextQuestionResponse>(`/api/practice/sessions/${sessionId}/next`, {
+      method: "POST",
+      timeoutMs: 60_000,
+    }),
+  submitAttempt: (questionId: string, payload: SubmitAttemptRequest) =>
+    request<AttemptResult>(`/api/practice/questions/${questionId}/attempt`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 45_000, // short 题 LLM 评分较慢
+    }),
+  hint: (questionId: string, hint_level: number) =>
+    request<HintResponse>(`/api/practice/questions/${questionId}/hint`, {
+      method: "POST",
+      body: JSON.stringify({ hint_level }),
+      timeoutMs: 30_000,
+    }),
+  finish: (sessionId: string) =>
+    request<FinishSessionResponse>(`/api/practice/sessions/${sessionId}/finish`, {
+      method: "POST",
+      timeoutMs: 60_000,
     }),
 };
 

@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Notebook,
   Sparkles,
+  Target,
   UserCog,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,6 +27,7 @@ interface AppHeaderProps {
 const NAV_LINKS = [
   { href: "/dashboard", label: "驾驶舱" },
   { href: "/agents", label: "老师", icon: GraduationCap },
+  { href: "/practice", label: "练习", icon: Target },
   { href: "/materials", label: "资料库", icon: Library },
   { href: "/notes", label: "笔记", icon: Notebook },
 ] as const;

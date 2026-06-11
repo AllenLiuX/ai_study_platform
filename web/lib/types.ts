@@ -323,3 +323,124 @@ export interface UpdateNoteRequest {
   parent_id?: string | null;
   mastery_score?: number;
 }
+
+// ============================================================================
+// Phase 6: 练习模块
+// ============================================================================
+
+export type PracticeQuestionKind = "mcq" | "multi_mcq" | "fill" | "short";
+export type PracticeSessionStatus = "active" | "finished" | "abandoned";
+export type PracticeDifficultyStrategy =
+  | "adaptive"
+  | "fixed_1"
+  | "fixed_2"
+  | "fixed_3"
+  | "fixed_4"
+  | "fixed_5";
+
+export interface PracticeSession {
+  id: string;
+  owner_id: string;
+  agent_key: string;
+  topic: string;
+  plan: string | null;
+  target_minutes: number;
+  target_question_count: number;
+  allowed_kinds: PracticeQuestionKind[];
+  difficulty_strategy: PracticeDifficultyStrategy;
+  model_tier: ModelTierId;
+  status: PracticeSessionStatus;
+  summary: Record<string, unknown> | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  question_count: number;
+  answered_count: number;
+  correct_count: number;
+}
+
+export interface CreatePracticeSessionRequest {
+  agent_key: string;
+  topic: string;
+  plan?: string | null;
+  target_minutes: number;
+  target_question_count: number;
+  allowed_kinds: PracticeQuestionKind[];
+  difficulty_strategy: PracticeDifficultyStrategy;
+  model_tier: ModelTierId;
+}
+
+export interface PracticeOption {
+  id: string;
+  text: string;
+}
+
+export interface PracticeQuestion {
+  id: string;
+  session_id: string;
+  idx: number;
+  kind: PracticeQuestionKind;
+  prompt: string;
+  options: PracticeOption[] | null;
+  explanation: string | null;
+  difficulty: number;
+  knowledge_points: string[];
+  source: string;
+  hints: string[];
+  created_at?: string | null;
+  // 复盘 / 续答时附:
+  attempt?: PracticeAttempt | null;
+  correct_answer?: unknown; // session 结束后,或学生已经作答时才暴露
+}
+
+export interface PracticeAttempt {
+  id: string;
+  question_id: string;
+  user_answer: unknown;
+  is_correct: boolean | null;
+  score: number | null;
+  feedback: string | null;
+  skipped: boolean;
+  time_spent_ms: number | null;
+  hints_used: number;
+  created_at?: string | null;
+}
+
+export interface SubmitAttemptRequest {
+  user_answer?: unknown;
+  skipped?: boolean;
+  time_spent_ms?: number;
+  hints_used?: number;
+}
+
+export interface AttemptResult {
+  attempt: PracticeAttempt;
+  correct_answer: unknown;
+  explanation: string | null;
+  knowledge_points: string[];
+}
+
+export interface NextQuestionResponse {
+  question: PracticeQuestion | null;
+  is_session_complete: boolean;
+  reason: string | null;
+}
+
+export interface HintResponse {
+  hint: string;
+  hint_level: number;
+}
+
+export interface FinishSessionResponse {
+  session: PracticeSession;
+  summary_markdown: string;
+  stats: {
+    answered: number;
+    correct: number;
+    wrong: number;
+    accuracy: number;
+    total_questions: number;
+    kp_stats: Record<string, { correct: number; wrong: number }>;
+  };
+}
