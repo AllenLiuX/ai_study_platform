@@ -1,26 +1,27 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   CheckCircle2,
   ChevronDown,
   Lightbulb,
   Loader2,
+  Notebook,
   Plus,
   SkipForward,
   Target,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 import { Button } from "@/components/ui/button";
 import { resolveAgentMeta } from "@/lib/agents";
-import { practiceApi } from "@/lib/api";
+import { notesApi, practiceApi } from "@/lib/api";
 import { useAgents } from "@/lib/hooks/useAgents";
 import type { PracticeQuestion, PracticeSession } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,9 @@ interface KpStat {
 export default function PracticeSummaryPage() {
   const params = useParams<{ sessionId: string }>();
   const sessionId = params.sessionId;
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [noteError, setNoteError] = useState<string | null>(null);
 
   const sessionQuery = useQuery<PracticeSession>({
     queryKey: ["practice-session", sessionId],
@@ -87,6 +91,17 @@ export default function PracticeSummaryPage() {
   }, [kpStats]);
 
   const weakest = kpRows.filter((r) => r.rate < 60).map((r) => r.kp);
+
+  const noteMutation = useMutation({
+    mutationFn: () =>
+      notesApi.createFromPractice({ practice_session_id: sessionId }),
+    onSuccess: (note) => {
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
+      router.push(`/notes/${note.id}`);
+    },
+    onError: (err) =>
+      setNoteError(err instanceof Error ? err.message : "整理笔记失败"),
+  });
 
   if (sessionQuery.isLoading) {
     return (
@@ -136,17 +151,46 @@ export default function PracticeSummaryPage() {
               {session.topic} · 复盘
             </h1>
           </div>
-          <Link
-            href={`/practice/new?agent=${encodeURIComponent(session.agent_key)}&topic=${encodeURIComponent(
-              weakest.length > 0 ? weakest.slice(0, 2).join("、") : session.topic,
-            )}`}
-          >
-            <Button className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              {weakest.length > 0 ? "针对薄弱点再练" : "再练一组"}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              disabled={noteMutation.isPending}
+              onClick={() => {
+                setNoteError(null);
+                noteMutation.mutate();
+              }}
+            >
+              {noteMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  AI 整理中…
+                </>
+              ) : (
+                <>
+                  <Notebook className="h-4 w-4" />
+                  整理为笔记
+                </>
+              )}
             </Button>
-          </Link>
+            <Link
+              href={`/practice/new?agent=${encodeURIComponent(session.agent_key)}&topic=${encodeURIComponent(
+                weakest.length > 0 ? weakest.slice(0, 2).join("、") : session.topic,
+              )}`}
+            >
+              <Button className="gap-1.5">
+                <Plus className="h-4 w-4" />
+                {weakest.length > 0 ? "针对薄弱点再练" : "再练一组"}
+              </Button>
+            </Link>
+          </div>
         </div>
+
+        {noteError ? (
+          <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {noteError}
+          </div>
+        ) : null}
 
         {/* 统计卡 */}
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">

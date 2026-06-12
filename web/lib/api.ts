@@ -338,6 +338,19 @@ export const notesApi = {
       body: JSON.stringify(payload),
       timeoutMs: 90_000, // 整段 session 可能更长,放宽超时
     }),
+  /** Phase 6.1: 把一次练习 (题目+作答+解析) 蒸馏成复习笔记 */
+  createFromPractice: (
+    payload: {
+      practice_session_id: string;
+      parent_id?: string | null;
+      tags?: string[] | null;
+    },
+  ) =>
+    request<KnowledgeNote>("/api/notes/from_practice", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 90_000,
+    }),
   update: (id: string, payload: UpdateNoteRequest) =>
     request<KnowledgeNote>(`/api/notes/${id}`, {
       method: "PATCH",

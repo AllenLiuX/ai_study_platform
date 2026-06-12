@@ -278,7 +278,7 @@ export interface GeneratedAgentSpec {
   suggested_model_tier: ModelTierId;
 }
 
-export type NoteSource = "chat" | "manual" | "imported";
+export type NoteSource = "chat" | "manual" | "imported" | "practice";
 export type NoteChunkStatus = "pending" | "processing" | "ready" | "failed";
 
 export interface KnowledgeNote {

@@ -11,6 +11,7 @@ from ..db import repos
 from ..schemas.note import (
     CreateNoteRequest,
     GenerateNoteFromMessageRequest,
+    GenerateNoteFromPracticeRequest,
     GenerateNoteFromSessionRequest,
     KnowledgeNote,
     ReviewNoteRequest,
@@ -120,6 +121,23 @@ async def create_note_from_session(
     row = await notes_service.generate_note_from_session(
         owner_id=user.id,
         session_id=payload.session_id,
+        parent_id=payload.parent_id,
+        tags_override=payload.tags,
+    )
+    background_tasks.add_task(notes_indexer.process_note, row["id"])
+    return _to_note(row)
+
+
+@router.post("/from_practice", response_model=KnowledgeNote, status_code=201)
+async def create_note_from_practice(
+    payload: GenerateNoteFromPracticeRequest,
+    background_tasks: BackgroundTasks,
+    user: CurrentUser = Depends(get_current_user),
+) -> KnowledgeNote:
+    """Phase 6.1: 把一次练习 (题目 + 作答 + 解析 + 统计) 蒸馏成复习笔记。"""
+    row = await notes_service.generate_note_from_practice(
+        owner_id=user.id,
+        practice_session_id=payload.practice_session_id,
         parent_id=payload.parent_id,
         tags_override=payload.tags,
     )

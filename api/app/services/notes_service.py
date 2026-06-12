@@ -422,3 +422,204 @@ async def generate_note_from_session(
         "chunk_status": "pending",
     }
     return repos.insert_note(payload)
+
+
+# =============================================================================
+# Phase 6.1: 练习 → 复习笔记 (复用同一 LLM 蒸馏管线)
+# =============================================================================
+
+_NOTE_FROM_PRACTICE_SYSTEM = """你是一个 AI 学习平台的"练习复习笔记助手"。
+学生刚完成一次针对性练习 (每道题含:题目 / 标准答案 / 学生作答 / 对错 / 解析)。
+你要把这次练习蒸馏成一份**面向复习的知识点笔记** — 学生以后翻这份笔记就能
+快速重温这次练习覆盖的知识点,尤其是踩过的坑。
+
+规则:
+- title 体现练习主题,例如:"量化系统设计练习复盘:撮合引擎与一致性"
+- summary 一句话 (≤ 50 字):练了什么 + 最大的薄弱点
+- content 是 markdown 正文,按知识点组织 (不是按题号!),推荐结构:
+    ## 知识点 A
+    - 核心结论 / 原理 (从题目和解析中提炼,写成可独立阅读的知识)
+    - ⚠️ 踩过的坑:学生答错的点 + 为什么错 + 正确思路 (没答错可省略)
+
+    ## 知识点 B
+    ...
+
+    ## 复习清单
+    - [ ] 需要重点复习的薄弱知识点 (按错误率排)
+    - [ ] 已掌握但值得隔期重温的点
+
+  正文 ≤ 3000 字,可含 LaTeX ($...$ / $$...$$)。
+  重点提炼"知识本身"而非"做题过程";答错的题要把错误选项为什么有迷惑性讲透。
+- tags 给 3-8 个标签 (领域相关,不要"练习"这类 meta 标签)
+- 如果练习信息太少 (例如只做了 1-2 道且都跳过),设 insufficient=true
+
+严格输出 JSON,不要 markdown 代码块包裹。字段:title / summary / content / tags / insufficient (bool) / insufficient_reason?
+"""
+
+
+def _format_answer_for_note(answer: Any) -> str:
+    """把题目 answer (str / list / dict) 拍平成可读文本。"""
+    if answer is None:
+        return "(无)"
+    if isinstance(answer, str):
+        return answer
+    if isinstance(answer, list):
+        return " / ".join(str(x) for x in answer)
+    if isinstance(answer, dict):
+        ref = answer.get("reference") or ""
+        rubric = answer.get("rubric") or ""
+        parts = [p for p in (ref, rubric and f"评分要点:{rubric}") if p]
+        return "\n".join(str(p) for p in parts) or json.dumps(answer, ensure_ascii=False)
+    return str(answer)
+
+
+def _build_practice_transcript(
+    session: dict, questions: list[dict], attempts_by_qid: dict[str, dict]
+) -> str:
+    """把一次练习的全部信息拼成 LLM 输入。"""
+    parts: list[str] = [
+        f"# 练习主题:{session['topic']}",
+    ]
+    if session.get("plan"):
+        parts.append(f"## 练习计划\n{_truncate_middle(session['plan'], 800)}")
+
+    summary = session.get("summary") or {}
+    kp_stats = summary.get("kp_stats") or {}
+    if kp_stats:
+        stat_lines = [
+            f"- {kp}: 对 {s.get('correct', 0)} / 错 {s.get('wrong', 0)}"
+            for kp, s in kp_stats.items()
+        ]
+        parts.append("## 知识点表现统计\n" + "\n".join(stat_lines))
+
+    for q in questions:
+        att = attempts_by_qid.get(q["id"]) or {}
+        if att.get("skipped"):
+            verdict = "跳过"
+        elif att.get("is_correct") is True:
+            verdict = "✓ 答对"
+        elif att.get("is_correct") is False:
+            verdict = "✗ 答错"
+        elif att.get("score") is not None:
+            verdict = f"评分 {att['score']}/10"
+        else:
+            verdict = "未答"
+
+        lines = [
+            f"## 第 {q['idx']} 题 [{q['kind']} | 难度 {q['difficulty']} | "
+            f"知识点: {', '.join(q.get('knowledge_points') or []) or '-'} | {verdict}]",
+            f"题目:{_truncate_middle(q['prompt'], 600)}",
+        ]
+        if q.get("options"):
+            opts = "; ".join(
+                f"{o.get('id')}. {o.get('text')}" for o in q["options"]
+            )
+            lines.append(f"选项:{_truncate_middle(opts, 400)}")
+        lines.append(f"标准答案:{_truncate_middle(_format_answer_for_note(q.get('answer')), 400)}")
+        if att.get("user_answer") is not None:
+            ua = att["user_answer"]
+            ua_text = ", ".join(str(x) for x in ua) if isinstance(ua, list) else str(ua)
+            lines.append(f"学生作答:{_truncate_middle(ua_text, 300)}")
+        if att.get("feedback"):
+            lines.append(f"AI 评语:{_truncate_middle(att['feedback'], 300)}")
+        if q.get("explanation"):
+            lines.append(f"解析:{_truncate_middle(q['explanation'], 500)}")
+        if att.get("hints_used"):
+            lines.append(f"(用了 {att['hints_used']} 次提示)")
+        parts.append("\n".join(lines))
+
+    transcript = "\n\n".join(parts)
+    if len(transcript) > _SESSION_TRANSCRIPT_MAX_CHARS:
+        keep = _SESSION_TRANSCRIPT_MAX_CHARS // 2 - 50
+        transcript = (
+            f"{transcript[:keep]}\n\n"
+            f"... [中段省略 {len(transcript) - 2 * keep} 字] ...\n\n"
+            f"{transcript[-keep:]}"
+        )
+    return transcript
+
+
+async def generate_note_from_practice(
+    *,
+    owner_id: str,
+    practice_session_id: str,
+    parent_id: str | None = None,
+    tags_override: list[str] | None = None,
+) -> dict:
+    """把一次练习 (题目 + 作答 + 解析 + 统计) 蒸馏为一份复习笔记。"""
+    session = repos.get_practice_session(practice_session_id, owner_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="练习不存在或无权访问")
+
+    questions = repos.list_practice_questions(practice_session_id)
+    if not questions:
+        raise HTTPException(status_code=422, detail="该练习还没有任何题目")
+
+    attempts = repos.list_practice_attempts([q["id"] for q in questions])
+    attempts_by_qid: dict[str, dict] = {}
+    for a in attempts:
+        attempts_by_qid[a["question_id"]] = a  # 取最新
+
+    answered = [
+        q for q in questions
+        if q["id"] in attempts_by_qid and not attempts_by_qid[q["id"]].get("skipped")
+    ]
+    if not answered:
+        raise HTTPException(status_code=422, detail="还没有作答任何题目,先做几道再整理")
+
+    transcript = _build_practice_transcript(session, questions, attempts_by_qid)
+
+    client = get_client()
+    model = resolve_model(ModelTier.MEDIUM)
+    try:
+        resp = await client.chat.completions.create(
+            **build_chat_kwargs(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _NOTE_FROM_PRACTICE_SYSTEM},
+                    {"role": "user", "content": transcript},
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"},
+            ),
+        )
+    except OpenAIAPIError as exc:
+        logger.warning("generate note from practice llm failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"LLM 调用失败: {exc}") from exc
+
+    text = (resp.choices[0].message.content or "").strip()
+    try:
+        data = _safe_load_json(text)
+    except Exception as exc:
+        logger.warning("practice note llm bad json: %s\n%s", exc, text[:500])
+        raise HTTPException(status_code=502, detail="LLM 输出格式异常,请重试") from exc
+
+    if data.get("insufficient"):
+        raise HTTPException(
+            status_code=422,
+            detail=data.get("insufficient_reason") or "练习信息不足以形成笔记",
+        )
+
+    title = str(data.get("title") or "").strip()[:200]
+    summary = str(data.get("summary") or "").strip()[:500]
+    content = str(data.get("content") or "").strip()
+    if not title or not content:
+        raise HTTPException(status_code=502, detail="LLM 输出缺少 title / content")
+
+    tags = tags_override
+    if tags is None:
+        tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()][:20]
+
+    payload = {
+        "owner_id": owner_id,
+        "agent_key": session.get("agent_key"),
+        # origin_session_id 的 FK 指向 chat_sessions,练习笔记不挂
+        "title": title,
+        "summary": summary or None,
+        "content": content,
+        "tags": tags,
+        "parent_id": parent_id,
+        "source": "practice",
+        "chunk_status": "pending",
+    }
+    return repos.insert_note(payload)

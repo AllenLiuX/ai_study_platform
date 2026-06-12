@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-NoteSource = Literal["chat", "manual", "imported"]
+NoteSource = Literal["chat", "manual", "imported", "practice"]
 ChunkStatus = Literal["pending", "processing", "ready", "failed"]
 
 
@@ -47,6 +47,14 @@ class GenerateNoteFromSessionRequest(BaseModel):
     """从整段对话蒸馏笔记 (一键整理整个 session)。"""
 
     session_id: str  # chat_sessions.id
+    parent_id: str | None = None
+    tags: list[str] | None = None
+
+
+class GenerateNoteFromPracticeRequest(BaseModel):
+    """Phase 6.1: 从一次练习 (题目 + 作答 + 解析) 蒸馏复习笔记。"""
+
+    practice_session_id: str  # practice_sessions.id
     parent_id: str | None = None
     tags: list[str] | None = None
 
