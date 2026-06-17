@@ -106,13 +106,13 @@ export function ChatWindow({
   })();
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="relative min-h-0 min-w-0 flex-1">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto scrollbar-thin"
+        className="h-full overflow-y-auto overflow-x-hidden scrollbar-thin"
       >
-        <div className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mx-auto flex min-w-0 max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6 sm:py-8">
         {messages.length === 0 && !isStreaming && (
           <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center shadow-card">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-foreground text-2xl text-background">
@@ -298,7 +298,8 @@ function MessageBubble({
   return (
     <div
       className={cn(
-        "flex items-start gap-3 animate-fade-in",
+        // min-w-0 让 flex 子元素能收缩,避免气泡被长文本/代码块撑出 viewport
+        "flex min-w-0 items-start gap-3 animate-fade-in",
         isUser && "flex-row-reverse",
       )}
     >
@@ -315,7 +316,8 @@ function MessageBubble({
       </div>
       <div
         className={cn(
-          "max-w-[78ch] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+          // 移动端 78ch (~ 700px) 大于 viewport,会强制横滑;改成响应式 + min-w-0
+          "min-w-0 max-w-full overflow-hidden rounded-2xl px-4 py-3 text-sm leading-relaxed sm:max-w-[78ch]",
           isUser
             ? "bg-primary text-primary-foreground shadow-sm"
             : "border border-border bg-card shadow-card",

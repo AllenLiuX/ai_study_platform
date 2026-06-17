@@ -299,7 +299,7 @@ export function ChatInput({
             type="button"
             size="icon"
             variant="ghost"
-            className="text-muted-foreground hover:text-foreground"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
             title={`贴一张题目图片 (最多 ${MAX_IMAGES} 张 · ≤ ${MAX_BYTES / 1024 / 1024}MB)`}
             disabled={disabled || images.length >= MAX_IMAGES}
             onClick={() => fileInputRef.current?.click()}
@@ -313,7 +313,7 @@ export function ChatInput({
               size="icon"
               variant="ghost"
               className={cn(
-                "transition",
+                "shrink-0 transition",
                 webSearchAvailable
                   ? webSearch
                     ? "bg-primary/10 text-primary hover:bg-primary/15"
@@ -344,15 +344,18 @@ export function ChatInput({
             placeholder={
               images.length > 0
                 ? "再补充几句话?(可留空,Enter 直接发图)"
-                : `和 ${agent.displayName} 说点什么…  Enter 发送 · 可拖入/粘贴题目截图`
+                : `和 ${agent.displayName} 说点什么…  Enter 发送`
             }
             rows={1}
-            className="max-h-[200px] min-h-[44px] resize-none border-0 bg-transparent p-2 shadow-none focus-visible:ring-0"
+            // min-w-0 + flex-1 让 textarea 在 flex 行内能正确收缩,
+            // 不会把右边的 Send 按钮挤出 viewport (移动端关键 bug)
+            className="min-w-0 flex-1 max-h-[200px] min-h-[44px] resize-none border-0 bg-transparent p-2 shadow-none focus-visible:ring-0"
           />
           {disabled ? (
             <Button
               size="icon"
               variant="secondary"
+              className="shrink-0"
               onClick={onStop}
               title="停止生成"
               disabled={!onStop}
@@ -362,6 +365,7 @@ export function ChatInput({
           ) : (
             <Button
               size="icon"
+              className="shrink-0"
               onClick={submit}
               title={
                 stillUploading

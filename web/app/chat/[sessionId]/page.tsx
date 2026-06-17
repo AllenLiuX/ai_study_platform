@@ -323,7 +323,12 @@ export default function ChatSessionPage() {
   const loading = messagesQuery.isLoading || sessionsQuery.isLoading;
 
   return (
-    <div className="flex h-screen flex-col bg-app-gradient">
+    // 移动端关键:
+    //   1. h-dvh 而非 h-screen 一一 iOS Safari 100vh 包含会自动隐藏的 chrome 栏,
+    //      会把 ChatInput 推到可见区外。dvh 是 dynamic viewport height,实时跟随。
+    //   2. overflow-x-hidden 一一 兜底防止任何子元素 (长 URL / 大表格) 撑出横向滚动,
+    //      导致整个页面左右晃动、找不到发送按钮。
+    <div className="flex h-dvh flex-col overflow-x-hidden bg-app-gradient">
       <AppHeader />
       <div className="flex flex-1 overflow-hidden">
         <AgentSidebar
@@ -333,7 +338,7 @@ export default function ChatSessionPage() {
           sessions={sessionsQuery.data ?? []}
         />
 
-        <div className="flex flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           {/*
             chat header 必须 relative + z-30:否则 ModelSelector 的 popover
             会被下方 ChatWindow 容器(overflow-y-auto 自带新 stacking context)
