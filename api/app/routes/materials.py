@@ -64,11 +64,17 @@ async def upload_material(
 
     mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
     detected = parser.detect_kind(mime, file.filename)
-    # Phase 4.1: 在 PDF/text 之外接受图片 — 走 vision_extractor 提取 markdown
-    if detected not in {"pdf", "text", "image"}:
+    # Phase 4.2: 老 .doc 二进制格式我们认得,但解析不了,给前端一个清楚指引
+    if detected == "doc_legacy":
         raise HTTPException(
             status_code=400,
-            detail="目前支持 PDF / TXT / Markdown / 图片 (PNG/JPG/WEBP/GIF)",
+            detail="暂不支持老版 .doc 格式(Word 97-2003),请在 Word/WPS 里『另存为 .docx』后再上传",
+        )
+    # Phase 4.1+4.2: 在 PDF/text 之外接受 docx / 图片 — 图片走 vision_extractor 抽 markdown
+    if detected not in {"pdf", "text", "docx", "image"}:
+        raise HTTPException(
+            status_code=400,
+            detail="目前支持 PDF / DOCX / TXT / Markdown / 图片 (PNG/JPG/WEBP/GIF)",
         )
 
     data = await file.read()

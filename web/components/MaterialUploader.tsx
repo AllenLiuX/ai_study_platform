@@ -22,9 +22,12 @@ const TYPE_OPTIONS: { value: MaterialType; label: string }[] = [
 ];
 
 // Phase 4.1: 图片资料 (PNG/JPG/WEBP/GIF) 也走资料库,后端用 OpenAI vision 抽 markdown
+// Phase 4.2: 接 Word (.docx);.doc 在后端会被拦下来,给用户「另存为 .docx」的提示
 const ACCEPT = [
-  ".pdf,.txt,.md,.markdown",
+  ".pdf,.txt,.md,.markdown,.docx,.doc",
   "application/pdf,text/plain,text/markdown",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
   ".png,.jpg,.jpeg,.webp,.gif",
   "image/png,image/jpeg,image/webp,image/gif",
 ].join(",");
@@ -111,9 +114,10 @@ export function MaterialUploader({
           )}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          支持 PDF / TXT / Markdown / 图片 (PNG/JPG/WEBP),最大 {MAX_MB}MB。
+          支持 PDF / Word (.docx) / TXT / Markdown / 图片 (PNG/JPG/WEBP),最大 {MAX_MB}MB。
           扫描版 PDF 和图片会自动用视觉模型抽成 markdown(含公式),再切片向量化,
           之后在对话里可以勾选这份资料让 AI 基于它回答。
+          老 .doc 请先在 Word/WPS 里「另存为 .docx」。
         </p>
       </div>
 
@@ -150,7 +154,7 @@ export function MaterialUploader({
             <Upload className="h-7 w-7 text-muted-foreground" />
             <div className="text-sm font-medium">把文件拖到这里,或点击选择</div>
             <div className="text-xs text-muted-foreground">
-              PDF / TXT / Markdown / 图片 · 扫描件和图片走视觉提取
+              PDF / DOCX / TXT / Markdown / 图片 · 扫描件和图片走视觉提取
             </div>
           </>
         )}

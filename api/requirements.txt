@@ -10,6 +10,9 @@ PyJWT[crypto]>=2.9.0
 python-multipart>=0.0.10
 # Phase 1: 资料解析与切片
 pypdf>=4.3.0
+# Phase 4.2: Word 文档 (.docx) 解析
+# .doc 是 OLE 二进制老格式,纯 Python 无良方案,后端会提示用户另存为 .docx
+python-docx>=1.1.0
 tiktoken>=0.7.0
 # Phase 1.5: 平台公共资料生成 (读取课标 yaml)
 PyYAML>=6.0
