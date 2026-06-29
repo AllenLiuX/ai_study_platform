@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/materials", tags=["materials"])
 
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB,Phase 1 上限,先卡这里防止误传大文件
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50MB,教科书/试卷 PDF 经常 30-40MB,留点余量
 STORAGE_BUCKET = "materials"
 
 

@@ -28,7 +28,12 @@ const ACCEPT = [
   ".png,.jpg,.jpeg,.webp,.gif",
   "image/png,image/jpeg,image/webp,image/gif",
 ].join(",");
-const MAX_MB = 20;
+const MAX_MB = 50;
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
 
 interface MaterialUploaderProps {
   subjects: Subject[];
@@ -51,20 +56,26 @@ export function MaterialUploader({
   const [uploading, setUploading] = useState(false);
 
   function pickFile(f: File) {
-    setError(null);
-    if (f.size > MAX_MB * 1024 * 1024) {
-      setError(`文件不能超过 ${MAX_MB}MB`);
-      return;
-    }
+    // 即使文件不合格也设到 state,让按钮可见可点,
+    // 避免用户「选了文件、按钮还是灰」找不到原因。具体校验在 submit 里再做。
     setFile(f);
     if (!title) {
       setTitle(f.name.replace(/\.[^.]+$/, ""));
+    }
+    if (f.size > MAX_MB * 1024 * 1024) {
+      setError(`文件 ${formatSize(f.size)},超过单文件上限 ${MAX_MB}MB,请压缩或拆分后再上传`);
+    } else {
+      setError(null);
     }
   }
 
   async function submit() {
     if (!file) {
       setError("请先选一份资料");
+      return;
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setError(`文件 ${formatSize(file.size)},超过单文件上限 ${MAX_MB}MB,请压缩或拆分后再上传`);
       return;
     }
     setUploading(true);
@@ -129,9 +140,9 @@ export function MaterialUploader({
         {file ? (
           <>
             <FileText className="h-7 w-7 text-primary" />
-            <div className="text-sm font-medium">{file.name}</div>
+            <div className="text-sm font-medium break-all">{file.name}</div>
             <div className="text-xs text-muted-foreground">
-              {(file.size / 1024).toFixed(1)} KB · 点击或拖拽更换
+              {formatSize(file.size)} · 点击或拖拽更换
             </div>
           </>
         ) : (
