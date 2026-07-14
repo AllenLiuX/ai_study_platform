@@ -5,15 +5,20 @@
  *
  * 流程:
  *  1. 用户点大红按钮开始录音,MediaRecorder 每 12s 一段送后端 Whisper
- *  2. 后端返回该段转写,前端追加到 transcript textarea (用户可实时看到 / 编辑)
+ *  2. 后端返回该段转写,前端追加为一个"带时间戳的段落"(用户可实时看到 / 编辑)
  *  3. 按停止 → 最后一段收尾上传
- *  4. 用户可修改标题 + 转写内容 → 点"保存并生成复习笔记" → 后端 LLM 蒸馏
+ *  4. 用户可修改标题 + 各段内容 → 点"保存并生成复习笔记" → 后端 LLM 蒸馏
  *  5. 成功后跳到 /notes/[noteId]
  *
- * localStorage 兜底:防止刷新丢失,60s / 每段写一次
+ * 时间戳设计 (参考主流会议纪要):
+ *  - 每段左侧一个小灰色 MM:SS 徽标,标明该段音频在整个录音中的起始时刻
+ *  - 段落文本用 textarea 单独可编辑,不会互相影响
+ *  - 保存时把各段拼成 "[MM:SS] text..." 一起送后端,原始转写附录里保留时间戳
+ *
+ * localStorage 兜底:防止刷新丢失,每次改动就写一次
  */
 
-import { FileText, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { FileText, Loader2, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -22,62 +27,111 @@ import { LectureRecorder, type RecorderStatus } from "@/components/LectureRecord
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { lectureApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const LS_KEY = "lecture:draft:v1";
+const LS_KEY = "lecture:draft:v2"; // v2: chunks 结构 (v1 是 transcript 字符串)
+
+interface TranscriptChunk {
+  /** 稳定 id,用作 React key */
+  id: string;
+  /** 该段音频起始时刻 (相对录音起点) 的秒数 */
+  startSec: number;
+  /** 段落文本 (可能被用户手改过) */
+  text: string;
+  /** 是否为手动输入 (非录音自动来的) — 目前只用于 UI 提示 */
+  manual?: boolean;
+}
 
 interface Draft {
   title: string;
-  transcript: string;
+  chunks: TranscriptChunk[];
   savedAt: number;
+}
+
+function formatTimestamp(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
+}
+
+function makeChunkId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export default function LecturePage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
-  const [transcript, setTranscript] = useState("");
+  const [chunks, setChunks] = useState<TranscriptChunk[]>([]);
   const [recorderStatus, setRecorderStatus] = useState<RecorderStatus>("idle");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [restoredAt, setRestoredAt] = useState<number | null>(null);
 
-  // 每段转写通过 index 附加,防止乱序:小 index 拼在前
-  const chunkTextsRef = useRef<Map<number, string>>(new Map());
+  // recorder 里的 chunkIndex → 我们这里的 chunk id 映射,避免同一个 index 被追加多次
+  const chunkIdByRecorderIdx = useRef<Map<number, string>>(new Map());
 
-  // 从 localStorage 恢复草稿
+  // 从 localStorage 恢复草稿 (兼容旧版 v1: transcript 字符串)
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as Draft;
-      if (draft?.transcript?.trim()) {
-        setTitle(draft.title || "");
-        setTranscript(draft.transcript);
-        setRestoredAt(draft.savedAt);
+      const rawV2 = localStorage.getItem(LS_KEY);
+      if (rawV2) {
+        const draft = JSON.parse(rawV2) as Draft;
+        if (draft?.chunks?.length) {
+          setTitle(draft.title || "");
+          setChunks(draft.chunks);
+          setRestoredAt(draft.savedAt);
+          return;
+        }
+      }
+      // v1 兼容:老草稿是一个大字符串,恢复成 startSec=0 的一段
+      const rawV1 = localStorage.getItem("lecture:draft:v1");
+      if (rawV1) {
+        const draftV1 = JSON.parse(rawV1) as {
+          title?: string;
+          transcript?: string;
+          savedAt?: number;
+        };
+        if (draftV1?.transcript?.trim()) {
+          setTitle(draftV1.title || "");
+          setChunks([
+            {
+              id: makeChunkId(),
+              startSec: 0,
+              text: draftV1.transcript,
+              manual: true,
+            },
+          ]);
+          setRestoredAt(draftV1.savedAt ?? Date.now());
+        }
+        localStorage.removeItem("lecture:draft:v1");
       }
     } catch {
       // ignore
     }
   }, []);
 
-  // transcript 或 title 改变时,写入 localStorage
+  // chunks 或 title 改变时,写入 localStorage
   useEffect(() => {
-    if (!transcript.trim() && !title.trim()) return;
-    const payload: Draft = { title, transcript, savedAt: Date.now() };
+    if (chunks.length === 0 && !title.trim()) {
+      return;
+    }
+    const payload: Draft = { title, chunks, savedAt: Date.now() };
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(payload));
     } catch {
       // ignore
     }
-  }, [title, transcript]);
+  }, [title, chunks]);
 
   const clearDraft = useCallback(() => {
     setTitle("");
-    setTranscript("");
+    setChunks([]);
     setRestoredAt(null);
-    chunkTextsRef.current.clear();
+    chunkIdByRecorderIdx.current.clear();
     try {
       localStorage.removeItem(LS_KEY);
     } catch {
@@ -85,32 +139,72 @@ export default function LecturePage() {
     }
   }, []);
 
+  /** 录音器新来一段转写 → 追加为一个 TranscriptChunk (按 startSec 升序) */
   const handleTranscriptDelta = useCallback(
-    (text: string, chunkIndex: number) => {
-      chunkTextsRef.current.set(chunkIndex, text);
-      // 按 index 排序拼接,防乱序;每段用换行分开可读性更好
-      const merged = Array.from(chunkTextsRef.current.entries())
-        .sort((a, b) => a[0] - b[0])
-        .map(([, t]) => t.trim())
-        .filter(Boolean)
-        .join(" ");
-      // 保留用户已手动编辑的部分:如果 transcript 里没有当前 merged 前缀
-      // (说明用户改过),用换行追加避免覆盖用户修改
-      setTranscript((prev) => {
-        if (!prev) return merged;
-        // 如果 prev 是之前自动累积出来的 (以 merged-片段-earlier 结尾), merge 覆盖
-        // 简化处理:比较长度,新的更长时用 merged;否则以用户改过的 prev + 追加为准
-        if (prev.length <= merged.length && merged.startsWith(prev.slice(0, Math.floor(prev.length * 0.6)))) {
-          return merged;
-        }
-        return `${prev} ${text.trim()}`.trim();
+    (text: string, recorderIdx: number, startMs: number) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const startSec = Math.round(startMs / 1000);
+      // 同一个 recorderIdx 只应追加一次;若重复来了,更新文本
+      const existingId = chunkIdByRecorderIdx.current.get(recorderIdx);
+      if (existingId) {
+        setChunks((prev) =>
+          prev.map((c) => (c.id === existingId ? { ...c, text: trimmed } : c)),
+        );
+        return;
+      }
+      const id = makeChunkId();
+      chunkIdByRecorderIdx.current.set(recorderIdx, id);
+      setChunks((prev) => {
+        const next = [
+          ...prev,
+          { id, startSec, text: trimmed, manual: false } as TranscriptChunk,
+        ];
+        // 按 startSec 升序 (手动输入的 startSec=0 排最前;录音的按顺序自然升序)
+        next.sort((a, b) => a.startSec - b.startSec);
+        return next;
       });
     },
     [],
   );
 
+  const updateChunkText = useCallback((id: string, text: string) => {
+    setChunks((prev) => prev.map((c) => (c.id === id ? { ...c, text } : c)));
+  }, []);
+
+  const removeChunk = useCallback((id: string) => {
+    setChunks((prev) => prev.filter((c) => c.id !== id));
+    // 别删 map,让同一 recorderIdx 再来时不重建 (删了就当没这段)
+  }, []);
+
+  /** 空 chunks 时,提供一个空的 startSec=0 段供用户手动粘贴/输入 */
+  const addManualChunk = useCallback(() => {
+    setChunks((prev) => [
+      ...prev,
+      { id: makeChunkId(), startSec: 0, text: "", manual: true },
+    ]);
+  }, []);
+
   const isRecording = recorderStatus === "recording" || recorderStatus === "stopping";
-  const canSave = !!transcript.trim() && !isRecording && !saving;
+
+  /** 组装成一段完整字符串送后端。每段前加 [MM:SS] 标记,LLM 会保留在附录里 */
+  const buildFullTranscript = useCallback((): string => {
+    return chunks
+      .map((c) => {
+        const t = c.text.trim();
+        if (!t) return "";
+        return `[${formatTimestamp(c.startSec)}] ${t}`;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }, [chunks]);
+
+  const fullTranscript = useMemo(() => buildFullTranscript(), [buildFullTranscript]);
+  const totalChars = useMemo(
+    () => chunks.reduce((sum, c) => sum + c.text.length, 0),
+    [chunks],
+  );
+  const canSave = fullTranscript.length > 0 && !isRecording && !saving;
 
   async function handleSave() {
     if (!canSave) return;
@@ -118,11 +212,10 @@ export default function LecturePage() {
     setSaveError(null);
     try {
       const note = await lectureApi.saveAsNote({
-        transcript,
+        transcript: fullTranscript,
         title_hint: title.trim() || null,
         keep_raw_transcript: true,
       });
-      // 保存成功清草稿,跳到笔记详情
       try {
         localStorage.removeItem(LS_KEY);
       } catch {
@@ -136,8 +229,6 @@ export default function LecturePage() {
     }
   }
 
-  const transcriptWordCount = useMemo(() => transcript.length, [transcript]);
-
   return (
     <div className="min-h-dvh bg-app-gradient">
       <AppHeader />
@@ -145,8 +236,8 @@ export default function LecturePage() {
         <header className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">听课</h1>
           <p className="text-sm text-muted-foreground">
-            点录音把整堂课录下来,每 12 秒自动转成文字。结束后一键让 AI
-            蒸馏成一份结构化复习笔记(自动进入你的笔记库,可搜索、可被对话引用)。
+            点录音把整堂课录下来,每 12 秒自动转成文字并标上时间戳。结束后一键让
+            AI 蒸馏成结构化复习笔记(自动进入笔记库,可搜索、可被对话引用)。
           </p>
         </header>
 
@@ -175,19 +266,23 @@ export default function LecturePage() {
           disabled={saving}
         />
 
-        <section className="space-y-3 rounded-2xl border border-border bg-card p-5 shadow-card">
+        <section className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-card">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <FileText className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-base font-semibold">实时转写(可以边听边改)</h2>
+              <h2 className="text-base font-semibold">
+                实时转写(可以边听边改)
+              </h2>
             </div>
             <span className="text-xs text-muted-foreground">
-              {transcriptWordCount} 字
+              {chunks.length} 段 · {totalChars} 字
             </span>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="lecture-title">标题(可选,用于提示 AI 提取主题)</Label>
+            <Label htmlFor="lecture-title">
+              标题(可选,用于提示 AI 提取主题)
+            </Label>
             <Input
               id="lecture-title"
               value={title}
@@ -198,29 +293,14 @@ export default function LecturePage() {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="lecture-transcript">转写内容</Label>
-            <Textarea
-              id="lecture-transcript"
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              placeholder={
-                isRecording
-                  ? "转写会在这里实时出现…"
-                  : "点上面的红色按钮开始录音,或直接把已有文字粘贴到这里"
-              }
-              rows={12}
-              className={cn(
-                "min-h-[280px] leading-7",
-                isRecording && "border-primary/40",
-              )}
-              disabled={saving}
-            />
-            <p className="text-xs text-muted-foreground">
-              Whisper 可能有识别错字或断句问题,保存前可以直接改。原始转写会作为
-              附录保留在生成的笔记末尾,方便对照。
-            </p>
-          </div>
+          <TranscriptChunkList
+            chunks={chunks}
+            isRecording={isRecording}
+            saving={saving}
+            onChangeText={updateChunkText}
+            onRemove={removeChunk}
+            onAddManualChunk={addManualChunk}
+          />
 
           {saveError && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -229,7 +309,7 @@ export default function LecturePage() {
           )}
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {transcript.trim() && !isRecording && (
+            {chunks.length > 0 && !isRecording && (
               <Button
                 type="button"
                 variant="ghost"
@@ -266,6 +346,141 @@ export default function LecturePage() {
           )}
         </section>
       </main>
+    </div>
+  );
+}
+
+/** 转写段落列表 — 左侧小灰色时间戳 + 右侧可编辑 textarea */
+function TranscriptChunkList({
+  chunks,
+  isRecording,
+  saving,
+  onChangeText,
+  onRemove,
+  onAddManualChunk,
+}: {
+  chunks: TranscriptChunk[];
+  isRecording: boolean;
+  saving: boolean;
+  onChangeText: (id: string, text: string) => void;
+  onRemove: (id: string) => void;
+  onAddManualChunk: () => void;
+}) {
+  if (chunks.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-border bg-background/40 p-6 text-center">
+        <p className="text-sm text-muted-foreground">
+          {isRecording
+            ? "转写会在这里以带时间戳的段落形式实时出现…"
+            : "点上面红色按钮开始录音,或点下面按钮手动粘贴已有文字"}
+        </p>
+        {!isRecording && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="mt-3"
+            onClick={onAddManualChunk}
+            disabled={saving}
+          >
+            手动添加一段
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-border/60 rounded-xl border border-border bg-background/60">
+      {chunks.map((c) => (
+        <ChunkRow
+          key={c.id}
+          chunk={c}
+          disabled={saving}
+          onChangeText={onChangeText}
+          onRemove={onRemove}
+        />
+      ))}
+      {!isRecording && (
+        <div className="flex justify-end p-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onAddManualChunk}
+            disabled={saving}
+            className="text-xs text-muted-foreground"
+          >
+            + 手动加一段
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 单段:左时间戳(小灰) + 右自适应高度 textarea + 悬停显示删除 */
+function ChunkRow({
+  chunk,
+  disabled,
+  onChangeText,
+  onRemove,
+}: {
+  chunk: TranscriptChunk;
+  disabled: boolean;
+  onChangeText: (id: string, text: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const [hover, setHover] = useState(false);
+
+  // 内容变化时,让 textarea 高度贴合内容
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [chunk.text]);
+
+  return (
+    <div
+      className="group flex items-start gap-3 px-3 py-3 sm:px-4"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <span
+        className="mt-2 w-11 shrink-0 select-none text-right font-mono text-[11px] leading-none tabular-nums text-muted-foreground/70"
+        title="该段音频起始时刻(相对录音起点)"
+      >
+        {formatTimestamp(chunk.startSec)}
+      </span>
+      <textarea
+        ref={taRef}
+        value={chunk.text}
+        onChange={(e) => onChangeText(chunk.id, e.target.value)}
+        disabled={disabled}
+        rows={1}
+        className={cn(
+          "min-w-0 flex-1 resize-none border-none bg-transparent p-0 text-sm leading-6 outline-none",
+          "focus:ring-0",
+          "placeholder:text-muted-foreground/50",
+          chunk.manual && "italic",
+        )}
+        placeholder={chunk.manual ? "在这里手动输入或粘贴…" : ""}
+      />
+      <button
+        type="button"
+        aria-label="删除这一段"
+        onClick={() => onRemove(chunk.id)}
+        disabled={disabled}
+        className={cn(
+          "mt-1 shrink-0 rounded p-1 text-muted-foreground/60 transition",
+          "hover:bg-destructive/10 hover:text-destructive",
+          hover ? "opacity-100" : "opacity-0 sm:opacity-0 group-hover:opacity-100",
+        )}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }

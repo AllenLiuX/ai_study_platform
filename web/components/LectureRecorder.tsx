@@ -77,8 +77,10 @@ export interface ChunkState {
 }
 
 interface LectureRecorderProps {
-  /** 新一段转写完成:parent 应该追加到累计 transcript */
-  onTranscriptDelta: (text: string, chunkIndex: number) => void;
+  /** 新一段转写完成:parent 应该追加到 chunks 列表
+   *  startMs = 该段音频开始时相对录音起点的毫秒数 (用于时间戳)
+   */
+  onTranscriptDelta: (text: string, chunkIndex: number, startMs: number) => void;
   /** 录音状态变更 (用于禁用其他按钮) */
   onStatusChange?: (status: RecorderStatus) => void;
   /** 顶层错误 (麦克风被拒 / 浏览器不支持 …) */
@@ -148,7 +150,7 @@ export function LectureRecorder({
 
   /** 把一段 blob 送后端转写,失败自动重试 MAX_RETRY 次 */
   const uploadChunk = useCallback(
-    async (blob: Blob, index: number, durationMs: number) => {
+    async (blob: Blob, index: number, durationMs: number, startMs: number) => {
       const ext = mimeRef.current.ext || "webm";
       const filename = `chunk-${index}.${ext}`;
       let lastErr: unknown;
@@ -162,7 +164,7 @@ export function LectureRecorder({
           });
           inFlightAbortsRef.current.delete(ctrl);
           updateChunk(index, { status: "done", text, durationMs });
-          if (text.trim()) onTranscriptDelta(text, index);
+          if (text.trim()) onTranscriptDelta(text, index, startMs);
           return;
         } catch (err) {
           inFlightAbortsRef.current.delete(ctrl);
@@ -202,6 +204,8 @@ export function LectureRecorder({
     recorderRef.current = rec;
     const idx = ++chunkIdxRef.current;
     const cycleStart = performance.now();
+    // 该段音频开始时相对整个录音起点的毫秒 (供时间戳标记)
+    const startMs = Math.max(0, cycleStart - startedAtRef.current);
     const parts: Blob[] = [];
 
     rec.ondataavailable = (e) => {
@@ -218,7 +222,7 @@ export function LectureRecorder({
           durationMs,
         });
         // fire-and-forget,不阻塞下一段
-        void uploadChunk(blob, idx, durationMs);
+        void uploadChunk(blob, idx, durationMs, startMs);
       }
       // 只要还在录,立刻开新一段(不留缝)
       if (cyclingRef.current) startCycle();
