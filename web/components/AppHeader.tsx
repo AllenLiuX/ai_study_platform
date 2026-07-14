@@ -2,6 +2,7 @@
 
 import {
   GraduationCap,
+  Headphones,
   Library,
   Loader2,
   LogOut,
@@ -28,6 +29,7 @@ const NAV_LINKS = [
   { href: "/dashboard", label: "驾驶舱" },
   { href: "/agents", label: "老师", icon: GraduationCap },
   { href: "/practice", label: "练习", icon: Target },
+  { href: "/lecture", label: "听课", icon: Headphones },
   { href: "/materials", label: "资料库", icon: Library },
   { href: "/notes", label: "笔记", icon: Notebook },
 ] as const;

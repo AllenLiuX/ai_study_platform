@@ -366,6 +366,58 @@ export const notesApi = {
 };
 
 // -----------------------------------------------------------------------------
+// Phase 6.2: 听课 (Lecture) — 录音实时转写 + 保存为复习笔记
+// -----------------------------------------------------------------------------
+export interface TranscribeResponse {
+  text: string;
+  chars: number;
+}
+
+export const lectureApi = {
+  /** 上传一段音频 (webm / mp4 / m4a / wav ...) → 返回 Whisper 转写文本 */
+  transcribeChunk: async (
+    blob: Blob,
+    opts: { filename?: string; signal?: AbortSignal } = {},
+  ): Promise<TranscribeResponse> => {
+    const token = await getAccessToken();
+    const form = new FormData();
+    // 后端从后缀推 content-type,filename 要有正确扩展名
+    const filename = opts.filename ?? "chunk.webm";
+    form.set("file", blob, filename);
+    const resp = await fetch(`${API_BASE}/api/lecture/transcribe`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+      signal: opts.signal,
+    });
+    if (!resp.ok) {
+      let detail = `转写失败 ${resp.status}`;
+      try {
+        const body = await resp.json();
+        detail = body.detail ?? body.message ?? detail;
+      } catch {
+        // ignore
+      }
+      throw new Error(detail);
+    }
+    return (await resp.json()) as TranscribeResponse;
+  },
+  /** 把累积的完整转写 + 可选标题提示送后端 LLM 蒸馏成 KnowledgeNote */
+  saveAsNote: (payload: {
+    transcript: string;
+    title_hint?: string | null;
+    tags?: string[] | null;
+    parent_id?: string | null;
+    keep_raw_transcript?: boolean;
+  }) =>
+    request<KnowledgeNote>("/api/lecture/save", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 120_000, // 整节课蒸馏可能较慢
+    }),
+};
+
+// -----------------------------------------------------------------------------
 // Phase 6: 练习模块
 // -----------------------------------------------------------------------------
 export const practiceApi = {

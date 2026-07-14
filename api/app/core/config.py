@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     openai_embedding_model: str = Field(
         default="text-embedding-3-small", alias="OPENAI_EMBEDDING_MODEL"
     )
+    # Phase 6.2: 听课 (Lecture) 实时录音转写模型
+    # 可选 whisper-1 / gpt-4o-mini-transcribe / gpt-4o-transcribe
+    # 默认 whisper-1 便宜稳,中文识别足够;换成 4o-mini-transcribe 精度更高价格中等
+    openai_transcription_model: str = Field(
+        default="whisper-1", alias="OPENAI_TRANSCRIPTION_MODEL"
+    )
 
     # ------- Phase 3.5: 5 档模型(用户可在对话中现选)-------
     # 默认 medium = default,high = premium,保证旧 .env 不改也能跑;

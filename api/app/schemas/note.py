@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-NoteSource = Literal["chat", "manual", "imported", "practice"]
+NoteSource = Literal["chat", "manual", "imported", "practice", "lecture"]
 ChunkStatus = Literal["pending", "processing", "ready", "failed"]
 
 
@@ -57,6 +57,20 @@ class GenerateNoteFromPracticeRequest(BaseModel):
     practice_session_id: str  # practice_sessions.id
     parent_id: str | None = None
     tags: list[str] | None = None
+
+
+class GenerateNoteFromLectureRequest(BaseModel):
+    """Phase 6.2: 从一段课堂录音转写蒸馏复习笔记。
+
+    转写文本可能很长,后端会做 head/tail 截断避免超 LLM 上下文;
+    并把截断后的原始转写作为附录附在笔记末尾方便对照。
+    """
+
+    transcript: str = Field(..., min_length=10, max_length=200_000)
+    title_hint: str | None = Field(default=None, max_length=200)
+    parent_id: str | None = None
+    tags: list[str] | None = None
+    keep_raw_transcript: bool = True
 
 
 class CreateNoteRequest(BaseModel):

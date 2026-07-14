@@ -623,3 +623,143 @@ async def generate_note_from_practice(
         "chunk_status": "pending",
     }
     return repos.insert_note(payload)
+
+
+# =============================================================================
+# Phase 6.2: 听课转写 → 复习笔记 (复用同一 LLM 蒸馏管线)
+# =============================================================================
+
+_NOTE_FROM_LECTURE_SYSTEM = """你是一个 AI 学习平台的"课堂录音复习笔记助手"。
+学生刚上完一节课,把整堂课的音频用 Whisper 转成了一份原始转写文本
+(可能有识别错字 / 断句奇怪 / 老师口头禅"这个""就是"等)。
+你要把这段转写蒸馏成一份**面向复习的知识点笔记**,让学生课后翻这份笔记
+就能快速回顾本节课学到什么、老师强调了什么、哪些是易错点。
+
+规则:
+- title 体现本节课的核心主题,例如:"高一物理:自由落体运动的规律与例题"、
+  "线性代数:矩阵秩与线性方程组解的结构"
+- summary 一句话 (≤ 50 字):本节课学了什么 + 最重要的 take-away
+- content 是 markdown 正文,按知识点组织 (不要按时间线!),推荐结构:
+    ## 一、核心概念/定义
+    - 概念名 + 精炼定义 (用自己的话,别直接抄转写)
+    - 关键公式 / 定理 (可用 LaTeX $...$ / $$...$$)
+
+    ## 二、重要推导 / 证明思路
+    - 老师讲的推导要点,只保留骨架和关键 insight
+
+    ## 三、典型例题
+    - 老师课上讲过的例题:题目 → 关键步骤 → 结论
+    - 只保留最有代表性的 2-3 道
+
+    ## 四、老师强调的易错点
+    - ⚠️ "常见坑" + 为什么错
+
+    ## 五、复习清单
+    - [ ] 需要重点复习的知识点
+    - [ ] 可以自己动手推导一次的公式 / 例题
+
+  正文 ≤ 3000 字,可含 LaTeX。**不要照搬原转写** — 要重新组织、精炼、去口头禅
+  和识别错字。老师如果只是闲聊 / 布置作业等和知识无关的段落,直接跳过不写。
+- tags 给 3-8 个标签 (学科 + 章节 + 知识点,不要"听课"这类 meta 标签)
+- 如果转写内容太少 / 大部分是噪音或闲聊 / 完全抽不出可复习的知识点,
+  设 insufficient=true 并简要说明原因
+
+严格输出 JSON,不要 markdown 代码块包裹。字段:title / summary / content / tags / insufficient (bool) / insufficient_reason?
+"""
+
+
+async def generate_note_from_transcript(
+    *,
+    owner_id: str,
+    transcript: str,
+    title_hint: str | None = None,
+    agent_key: str | None = None,
+    parent_id: str | None = None,
+    tags_override: list[str] | None = None,
+    keep_raw_transcript: bool = True,
+) -> dict:
+    """把一段课堂转写蒸馏为一份复习笔记。
+
+    转写文本可能很长 (60min 一节课约 8-12k 字),做 head/tail 截断避免超 LLM 上限。
+    keep_raw_transcript=True 时,会把原始转写 (截断后) 作为附录附在笔记 markdown 末尾,
+    方便学生对照检查、修正笔记内容。
+    """
+    if not transcript or not transcript.strip():
+        raise HTTPException(status_code=400, detail="转写文本为空,无法生成笔记")
+
+    raw = transcript.strip()
+
+    user_input_parts: list[str] = []
+    if title_hint:
+        user_input_parts.append(f"# 课堂标题提示\n{title_hint.strip()[:200]}")
+    user_input_parts.append(f"# 课堂音频转写(可能含识别噪音)\n{_truncate_middle(raw, _SESSION_TRANSCRIPT_MAX_CHARS)}")
+    user_input = "\n\n".join(user_input_parts)
+
+    client = get_client()
+    model = resolve_model(ModelTier.MEDIUM)
+    try:
+        resp = await client.chat.completions.create(
+            **build_chat_kwargs(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _NOTE_FROM_LECTURE_SYSTEM},
+                    {"role": "user", "content": user_input},
+                ],
+                temperature=0.3,
+                response_format={"type": "json_object"},
+            ),
+        )
+    except OpenAIAPIError as exc:
+        logger.warning("generate note from lecture llm failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"LLM 调用失败: {exc}") from exc
+
+    text = (resp.choices[0].message.content or "").strip()
+    try:
+        data = _safe_load_json(text)
+    except Exception as exc:
+        logger.warning("lecture note llm bad json: %s\n%s", exc, text[:500])
+        raise HTTPException(status_code=502, detail="LLM 输出格式异常,请重试") from exc
+
+    if data.get("insufficient"):
+        raise HTTPException(
+            status_code=422,
+            detail=data.get("insufficient_reason") or "转写内容不足以形成笔记",
+        )
+
+    title = str(data.get("title") or title_hint or "").strip()[:200]
+    summary = str(data.get("summary") or "").strip()[:500]
+    content = str(data.get("content") or "").strip()
+    if not title or not content:
+        raise HTTPException(status_code=502, detail="LLM 输出缺少 title / content")
+
+    # 附录:保留原始转写便于对照 (小屏可折叠 <details>)
+    if keep_raw_transcript:
+        # 限制附录长度,防止一份笔记撑爆 20k 字限制
+        appendix_raw = _truncate_middle(raw, 6000)
+        content += (
+            "\n\n---\n\n"
+            "<details>\n"
+            "<summary>📼 原始录音转写(供对照,可能有识别错字)</summary>\n\n"
+            f"{appendix_raw}\n\n"
+            "</details>\n"
+        )
+        # 保底不超过 note 表 content 上限
+        if len(content) > 19_500:
+            content = content[:19_500] + "\n\n...(转写附录被截断)"
+
+    tags = tags_override
+    if tags is None:
+        tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()][:20]
+
+    payload = {
+        "owner_id": owner_id,
+        "agent_key": agent_key,
+        "title": title,
+        "summary": summary or None,
+        "content": content,
+        "tags": tags,
+        "parent_id": parent_id,
+        "source": "lecture",
+        "chunk_status": "pending",
+    }
+    return repos.insert_note(payload)
