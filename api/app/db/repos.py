@@ -787,17 +787,64 @@ def get_group_member(group_id: str, user_id: str) -> dict | None:
 
 
 def list_group_members(group_id: str, limit: int = 100) -> list[dict]:
+    """列出群成员, 附上 display_name (student_profiles.name) + email (auth.users.email)."""
     client = get_admin_client()
     resp = (
         client.table("group_members")
         .select("*")
         .eq("group_id", group_id)
-        .order("role", desc=False)  # owner/admin/member 字典序不完全对, 前端可再排
+        .order("role", desc=False)  # owner/admin/member 字典序不完全对, 前端再排
         .order("joined_at", desc=False)
         .limit(limit)
         .execute()
     )
-    return resp.data or []
+    rows = resp.data or []
+    if not rows:
+        return rows
+
+    user_ids = [r["user_id"] for r in rows]
+
+    # 补 student_profiles.name
+    name_by_uid: dict[str, str | None] = {}
+    try:
+        p = (
+            client.table("student_profiles")
+            .select("user_id, name")
+            .in_("user_id", user_ids)
+            .execute()
+        )
+        for row in p.data or []:
+            name_by_uid[row["user_id"]] = row.get("name")
+    except Exception as exc:
+        logger.debug("fetch student_profiles for members failed: %s", exc)
+
+    # 补 auth.users.email (走 Admin API, 一次一个: supabase-py 无批量)
+    email_by_uid: dict[str, str | None] = {}
+    try:
+        for uid in user_ids:
+            try:
+                u = client.auth.admin.get_user_by_id(uid)
+                user_obj = getattr(u, "user", None) or u
+                email = getattr(user_obj, "email", None)
+                # fallback: user_metadata 里可能有 display_name / full_name
+                meta = getattr(user_obj, "user_metadata", None) or {}
+                if not name_by_uid.get(uid):
+                    name_by_uid[uid] = (
+                        meta.get("display_name")
+                        or meta.get("full_name")
+                        or meta.get("name")
+                    )
+                email_by_uid[uid] = email
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.debug("fetch auth users for members failed: %s", exc)
+
+    for r in rows:
+        uid = r["user_id"]
+        r["display_name"] = name_by_uid.get(uid)
+        r["email"] = email_by_uid.get(uid)
+    return rows
 
 
 def add_group_member(*, group_id: str, user_id: str, role: str = "member") -> dict:

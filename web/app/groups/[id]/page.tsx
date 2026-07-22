@@ -19,20 +19,25 @@ import {
   Loader2,
   LogOut,
   Notebook,
+  Pencil,
+  Save,
   Trash2,
   UserMinus,
   Users,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { groupsApi, materialsApi, notesApi } from "@/lib/api";
-import type { GroupMember } from "@/lib/types";
+import type { GroupDetail, GroupMember } from "@/lib/types";
 
 export default function GroupDetailPage() {
   const params = useParams<{ id: string }>();
@@ -91,6 +96,7 @@ export default function GroupDetailPage() {
   });
 
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [editing, setEditing] = useState(false);
   const copyInvite = () => {
     if (!detailQuery.data?.invite_code) return;
     navigator.clipboard.writeText(detailQuery.data.invite_code).then(() => {
@@ -195,6 +201,16 @@ export default function GroupDetailPage() {
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
+            {isOwner && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil className="mr-1.5 h-4 w-4" />
+                编辑信息
+              </Button>
+            )}
             {isOwner ? (
               <Button
                 variant="ghost"
@@ -325,6 +341,164 @@ export default function GroupDetailPage() {
           </Card>
         </section>
       </main>
+
+      {editing && (
+        <EditGroupDialog
+          group={detail}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ["group-detail", groupId] });
+            queryClient.invalidateQueries({ queryKey: ["my-groups"] });
+            setEditing(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// EditGroupDialog — 群主专用
+// -----------------------------------------------------------------------------
+function EditGroupDialog({
+  group,
+  onClose,
+  onSaved,
+}: {
+  group: GroupDetail;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(group.name);
+  const [description, setDescription] = useState(group.description ?? "");
+  const [emoji, setEmoji] = useState(group.emoji ?? "");
+  const [isPublic, setIsPublic] = useState(!!group.is_public);
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      groupsApi.update(group.id, {
+        name: name.trim(),
+        description: description.trim() || null,
+        emoji: emoji.trim() || null,
+        is_public: isPublic,
+      }),
+    onSuccess: onSaved,
+    onError: (err) => setError(err instanceof Error ? err.message : "保存失败"),
+  });
+
+  // ESC 关闭
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const changed =
+    name.trim() !== group.name ||
+    (description.trim() || null) !== (group.description ?? null) ||
+    (emoji.trim() || null) !== (group.emoji ?? null) ||
+    isPublic !== !!group.is_public;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="关闭"
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+      />
+      <div className="relative w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl">
+        <h3 className="text-lg font-semibold">编辑群信息</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          邀请码 <span className="font-mono">{group.invite_code}</span> 不会变。
+        </p>
+        <form
+          className="mt-4 space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!name.trim() || !changed) return;
+            setError(null);
+            mutation.mutate();
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-[80px_1fr]">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-emoji">图标</Label>
+              <Input
+                id="edit-emoji"
+                value={emoji}
+                onChange={(e) => setEmoji(e.target.value)}
+                placeholder="🏫"
+                maxLength={4}
+                className="text-center text-lg"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-name">群名 *</Label>
+              <Input
+                id="edit-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={60}
+                required
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-desc">简介</Label>
+            <Textarea
+              id="edit-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="这个群做什么、目标是什么"
+              maxLength={500}
+              rows={3}
+              className="resize-none"
+            />
+          </div>
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border p-3 text-sm">
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(e) => setIsPublic(e.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              <span className="font-medium">公开群</span>
+              <span className="ml-1 text-xs text-muted-foreground">
+                (勾选后其他人可在「搜索」里找到并直接加入)
+              </span>
+            </span>
+          </label>
+          {error && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              取消
+            </Button>
+            <Button
+              type="submit"
+              disabled={mutation.isPending || !name.trim() || !changed}
+            >
+              {mutation.isPending ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-1.5 h-4 w-4" />
+              )}
+              保存
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

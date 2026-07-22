@@ -153,6 +153,8 @@ async def get_group_detail(
             user_id=m["user_id"],
             role=m["role"],
             joined_at=m.get("joined_at"),
+            display_name=m.get("display_name"),
+            email=m.get("email"),
         )
         for m in members
     ]
@@ -186,6 +188,8 @@ async def list_members(
             user_id=r["user_id"],
             role=r["role"],
             joined_at=r.get("joined_at"),
+            display_name=r.get("display_name"),
+            email=r.get("email"),
         )
         for r in rows
     ]
