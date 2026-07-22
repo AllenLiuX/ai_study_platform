@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { PanelLeft, UserRound, X } from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -21,6 +22,7 @@ import {
   sendMessageStream,
   studentApi,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useAgents } from "@/lib/hooks/useAgents";
 import type {
   AgentType,
@@ -59,6 +61,20 @@ export default function ChatSessionPage() {
     queryFn: materialsApi.list,
   });
 
+  // 用于 StudentProfilePanel 的"学习进度"卡片:
+  // - notes count: 单独轻量拉一次 (只关心 length)
+  // - subject progress: 复用 dashboard 的 cache key,若 dashboard 已经拉过就直接命中
+  const notesListQuery = useQuery({
+    queryKey: ["notes"],
+    queryFn: () => notesApi.list(),
+    staleTime: 60_000,
+  });
+  const dashboardQuery = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: studentApi.getDashboard,
+    staleTime: 5 * 60_000,
+  });
+
   const configQuery = useQuery({
     queryKey: ["meta-config"],
     queryFn: metaApi.config,
@@ -79,6 +95,26 @@ export default function ChatSessionPage() {
     () => resolveAgentMeta(agentType, agentsQuery.data),
     [agentType, agentsQuery.data],
   );
+
+  // Phase 6.3: 手机端左右抽屉 (< md: 左边历史会话; < lg: 右边学生画像)
+  const [mobileLeftOpen, setMobileLeftOpen] = useState(false);
+  const [mobileRightOpen, setMobileRightOpen] = useState(false);
+  // 切 session 后自动关左抽屉
+  useEffect(() => {
+    setMobileLeftOpen(false);
+  }, [sessionId]);
+  // ESC 关抽屉
+  useEffect(() => {
+    if (!mobileLeftOpen && !mobileRightOpen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMobileLeftOpen(false);
+        setMobileRightOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileLeftOpen, mobileRightOpen]);
 
   const [streamingText, setStreamingText] = useState("");
   const [streamingCitations, setStreamingCitations] = useState<Citation[]>([]);
@@ -346,16 +382,26 @@ export default function ChatSessionPage() {
             stacking context 独立。
           */}
           <div className="relative z-30 flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-background/70 px-4 py-2 backdrop-blur sm:px-6">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-foreground text-xs text-background">
+            <div className="flex min-w-0 items-center gap-1.5 text-sm">
+              {/* 移动端左抽屉按钮 (< md):展开 AgentSidebar 看历史对话 */}
+              <button
+                type="button"
+                onClick={() => setMobileLeftOpen(true)}
+                aria-label="打开历史对话"
+                title="历史对话 / 切换老师"
+                className="-ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground md:hidden"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-foreground text-xs text-background">
                 {agent.emoji}
               </span>
-              <span className="font-semibold">{agent.displayName}</span>
+              <span className="min-w-0 truncate font-semibold">{agent.displayName}</span>
               <span className="hidden text-xs text-muted-foreground sm:inline">
                 · {agent.role}
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <SessionToNoteButton
                 sessionId={sessionId}
                 messageCount={messages.length}
@@ -367,6 +413,16 @@ export default function ChatSessionPage() {
                 onChange={pickTier}
                 disabled={isStreaming}
               />
+              {/* 移动端右抽屉按钮 (< lg):展开学生画像 / 学习进度 */}
+              <button
+                type="button"
+                onClick={() => setMobileRightOpen(true)}
+                aria-label="打开学生画像"
+                title="学生画像 / 学习进度"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground lg:hidden"
+              >
+                <UserRound className="h-4 w-4" />
+              </button>
             </div>
           </div>
           {loading ? (
@@ -421,8 +477,100 @@ export default function ChatSessionPage() {
           profile={profileQuery.data ?? null}
           agent={agent}
           modelLabel={effectiveModel}
+          sessions={sessionsQuery.data ?? []}
+          notesCount={
+            notesListQuery.isLoading ? null : notesListQuery.data?.length ?? 0
+          }
+          progress={dashboardQuery.data?.progress}
         />
       </div>
+
+      {/* ─── 移动端左抽屉:AgentSidebar (< md) ───────────────────────── */}
+      {mobileLeftOpen && (
+        <div
+          className="fixed inset-0 z-50 md:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="历史对话"
+        >
+          {/* 背景遮罩 */}
+          <button
+            type="button"
+            aria-label="关闭"
+            onClick={() => setMobileLeftOpen(false)}
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+          />
+          {/* 抽屉本体 (左侧滑入,最宽 320,留 48px 右侧可点关) */}
+          <div className="absolute inset-y-0 left-0 flex w-[calc(100%-3rem)] max-w-[320px] flex-col bg-background shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-3 py-2">
+              <span className="text-sm font-semibold">历史对话 / 老师</span>
+              <button
+                type="button"
+                onClick={() => setMobileLeftOpen(false)}
+                aria-label="关闭"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {/* flex-1 min-h-0 让 AgentSidebar 里的 overflow-y-auto 生效 */}
+            <div className="min-h-0 flex-1">
+              <AgentSidebar
+                className="h-full"
+                currentSessionId={sessionId}
+                currentAgent={agentType}
+                sessions={sessionsQuery.data ?? []}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 移动端右抽屉:StudentProfilePanel (< lg) ─────────────────── */}
+      {mobileRightOpen && (
+        <div
+          className="fixed inset-0 z-50 lg:hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-label="学生画像"
+        >
+          <button
+            type="button"
+            aria-label="关闭"
+            onClick={() => setMobileRightOpen(false)}
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+          />
+          <div className="absolute inset-y-0 right-0 flex w-[calc(100%-3rem)] max-w-[340px] flex-col bg-background shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between border-b border-border/60 px-3 py-2">
+              <span className="text-sm font-semibold">学生画像 / 学习进度</span>
+              <button
+                type="button"
+                onClick={() => setMobileRightOpen(false)}
+                aria-label="关闭"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 scrollbar-thin">
+              <StudentProfilePanel
+                profile={profileQuery.data ?? null}
+                agent={agent}
+                modelLabel={effectiveModel}
+                sessions={sessionsQuery.data ?? []}
+                notesCount={
+                  notesListQuery.isLoading
+                    ? null
+                    : notesListQuery.data?.length ?? 0
+                }
+                progress={dashboardQuery.data?.progress}
+                /* 抽屉内部已经处理了外层滚动/内边距,面板本身只需内容 */
+                className="w-full"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
