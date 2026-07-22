@@ -49,6 +49,10 @@ async def create_session(
     payload: CreatePracticeSessionRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> PracticeSession:
+    # Phase 8 · Billing: 免费用户每日练习会话数限额
+    from ..services import entitlements as ents
+    ents.enforce("practice_sessions_per_day", user.id)
+
     session = await practice_service.create_session(
         owner_id=user.id, payload=payload.model_dump()
     )

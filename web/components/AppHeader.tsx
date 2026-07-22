@@ -150,6 +150,7 @@ export function AppHeader({ className }: AppHeaderProps) {
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          <PlanBadge />
           {email && (
             <Link
               href="/onboarding?edit=true"
@@ -247,5 +248,54 @@ function ChatNavButton({
       )}
       对话
     </button>
+  );
+}
+
+/**
+ * Phase 8: 顶栏右上角展示当前套餐 (free/pro).
+ * - Free → 链到 /settings/plan (点击后可以看限额 / 联系管理员开通)
+ * - Pro  → 展示金色 badge, 不可点或链到 plan 页
+ * - 未登录 (billingApi.myPlan 401) → 什么都不渲染
+ */
+function PlanBadge() {
+  const [tier, setTier] = useState<"free" | "pro" | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    import("@/lib/api")
+      .then(({ billingApi }) => billingApi.myPlan())
+      .then((p) => {
+        if (alive) setTier(p.is_pro ? "pro" : "free");
+      })
+      .catch(() => {
+        /* 未登录 / 网络失败 → 不显示 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (!tier) return null;
+
+  if (tier === "pro") {
+    return (
+      <Link
+        href="/settings/plan"
+        className="hidden shrink-0 items-center gap-1 rounded-full border border-amber-400/60 bg-gradient-to-br from-amber-100 to-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-800 shadow-sm sm:inline-flex"
+        title="Pro 会员 · 查看订阅"
+      >
+        <Sparkles className="h-3 w-3" />
+        Pro
+      </Link>
+    );
+  }
+  return (
+    <Link
+      href="/settings/plan"
+      className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-secondary px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition hover:border-primary/40 hover:text-primary sm:inline-flex"
+      title="免费版 · 点击查看限额 / 升级"
+    >
+      升级 Pro
+    </Link>
   );
 }

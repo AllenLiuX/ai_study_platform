@@ -225,6 +225,44 @@ export interface Material {
 }
 
 // -----------------------------------------------------------------------------
+// Phase 8: Billing / Entitlements
+// -----------------------------------------------------------------------------
+export type PlanTier = "free" | "pro";
+
+export interface UsageItem {
+  key: string;
+  label: string;
+  used: number;
+  limit: number | null;
+  unlimited: boolean;
+  exhausted: boolean;
+  period: "day" | "total";
+}
+
+export interface MyPlan {
+  plan: PlanTier;
+  is_pro: boolean;
+  expires_at: string | null;
+  expired: boolean;
+  raw_plan: PlanTier;
+  granted_at: string | null;
+  note: string | null;
+  allowed_model_tiers: string[];
+  usage: UsageItem[];
+}
+
+/**
+ * 后端 402 Payment Required 的 detail 结构 (与 QuotaExceeded 对齐).
+ */
+export interface QuotaExceededDetail {
+  message: string;
+  limit_key: string;
+  limit: number | string[] | null;
+  used: number | string;
+  upgrade_hint: string;
+}
+
+// -----------------------------------------------------------------------------
 // Phase 7.1: Admin dashboard
 // -----------------------------------------------------------------------------
 export interface AdminMe {
@@ -291,6 +329,8 @@ export interface AdminUserRow {
   messages: number;
   notes: number;
   materials: number;
+  plan?: PlanTier;
+  plan_expires_at?: string | null;
 }
 
 export interface AdminTopUser {

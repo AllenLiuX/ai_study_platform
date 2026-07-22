@@ -9,28 +9,37 @@
 
 export const dynamic = "force-dynamic";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  Crown,
   FileText,
   Loader2,
   MessageSquare,
   Notebook,
+  Save,
+  Sparkles,
   Target,
   Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { adminApi } from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { adminApi, adminBillingApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
   AdminBreakdown,
   AdminBreakdownItem,
   AdminTrendPoint,
+  AdminUserRow,
+  PlanTier,
 } from "@/lib/types";
 
 export default function AdminPage() {
@@ -584,62 +593,300 @@ function RecentUsersTable({
   users,
 }: {
   loading?: boolean;
-  users: import("@/lib/types").AdminUserRow[];
+  users: AdminUserRow[];
 }) {
+  const [editing, setEditing] = useState<AdminUserRow | null>(null);
   if (loading) return <SkeletonRows n={10} />;
   if (users.length === 0) return <EmptyBlock text="还没有用户" />;
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] text-sm">
-        <thead className="border-b border-border bg-secondary/40 text-xs text-muted-foreground">
-          <tr>
-            <th className="px-4 py-2 text-left">用户</th>
-            <th className="px-4 py-2 text-left">年级/学校</th>
-            <th className="px-4 py-2 text-left">学习目标</th>
-            <th className="px-4 py-2 text-right">消息</th>
-            <th className="px-4 py-2 text-right">笔记</th>
-            <th className="px-4 py-2 text-right">资料</th>
-            <th className="px-4 py-2 text-left">注册</th>
-            <th className="px-4 py-2 text-left">最近登录</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.user_id} className="border-b border-border/40 last:border-0">
-              <td className="px-4 py-2">
-                <div className="font-medium">
-                  {u.display_name || u.email || u.user_id.slice(0, 8)}
-                </div>
-                {u.display_name && u.email && (
-                  <div className="text-xs text-muted-foreground">{u.email}</div>
-                )}
-              </td>
-              <td className="px-4 py-2 text-muted-foreground">
-                <div>{u.grade ?? "—"}</div>
-                {u.school && (
-                  <div className="text-xs text-muted-foreground/70">{u.school}</div>
-                )}
-              </td>
-              <td className="max-w-[220px] px-4 py-2 text-xs text-muted-foreground">
-                <div className="truncate" title={u.learning_goal ?? ""}>
-                  {u.learning_goal ?? "—"}
-                </div>
-              </td>
-              <td className="px-4 py-2 text-right tabular-nums">{u.messages}</td>
-              <td className="px-4 py-2 text-right tabular-nums">{u.notes}</td>
-              <td className="px-4 py-2 text-right tabular-nums">{u.materials}</td>
-              <td className="whitespace-nowrap px-4 py-2 text-xs text-muted-foreground">
-                {u.created_at ? new Date(u.created_at).toLocaleDateString("zh-CN") : "—"}
-              </td>
-              <td className="whitespace-nowrap px-4 py-2 text-xs text-muted-foreground">
-                {u.last_sign_in_at
-                  ? new Date(u.last_sign_in_at).toLocaleDateString("zh-CN")
-                  : "—"}
-              </td>
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] text-sm">
+          <thead className="border-b border-border bg-secondary/40 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-4 py-2 text-left">用户</th>
+              <th className="px-4 py-2 text-left">套餐</th>
+              <th className="px-4 py-2 text-left">年级/学校</th>
+              <th className="px-4 py-2 text-right">消息</th>
+              <th className="px-4 py-2 text-right">笔记</th>
+              <th className="px-4 py-2 text-right">资料</th>
+              <th className="px-4 py-2 text-left">注册</th>
+              <th className="px-4 py-2 text-left">最近登录</th>
+              <th className="px-4 py-2 text-right">操作</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.user_id} className="border-b border-border/40 last:border-0">
+                <td className="px-4 py-2">
+                  <div className="font-medium">
+                    {u.display_name || u.email || u.user_id.slice(0, 8)}
+                  </div>
+                  {u.display_name && u.email && (
+                    <div className="text-xs text-muted-foreground">{u.email}</div>
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  <PlanCell
+                    plan={u.plan ?? "free"}
+                    expiresAt={u.plan_expires_at}
+                  />
+                </td>
+                <td className="px-4 py-2 text-muted-foreground">
+                  <div>{u.grade ?? "—"}</div>
+                  {u.school && (
+                    <div className="text-xs text-muted-foreground/70">{u.school}</div>
+                  )}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums">{u.messages}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{u.notes}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{u.materials}</td>
+                <td className="whitespace-nowrap px-4 py-2 text-xs text-muted-foreground">
+                  {u.created_at ? new Date(u.created_at).toLocaleDateString("zh-CN") : "—"}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 text-xs text-muted-foreground">
+                  {u.last_sign_in_at
+                    ? new Date(u.last_sign_in_at).toLocaleDateString("zh-CN")
+                    : "—"}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 text-right">
+                  <Button
+                    size="sm"
+                    variant={u.plan === "pro" ? "secondary" : "default"}
+                    onClick={() => setEditing(u)}
+                  >
+                    <Crown className="mr-1 h-3.5 w-3.5" />
+                    {u.plan === "pro" ? "调整" : "开 Pro"}
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editing && (
+        <SetPlanDialog
+          user={editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function PlanCell({
+  plan,
+  expiresAt,
+}: {
+  plan: PlanTier;
+  expiresAt?: string | null;
+}) {
+  if (plan === "pro") {
+    const exp = expiresAt ? new Date(expiresAt) : null;
+    const expired = !!exp && exp < new Date();
+    return (
+      <div className="space-y-0.5">
+        <Badge
+          className={cn(
+            "border-none text-white",
+            expired
+              ? "bg-muted-foreground/70"
+              : "bg-gradient-to-br from-amber-500 to-amber-600",
+          )}
+        >
+          <Sparkles className="mr-0.5 h-3 w-3" />
+          {expired ? "Pro (已过期)" : "Pro"}
+        </Badge>
+        {exp && (
+          <div className="text-[10px] text-muted-foreground">
+            {expired ? "过期于 " : "到期 "}
+            {exp.toLocaleDateString("zh-CN")}
+          </div>
+        )}
+      </div>
+    );
+  }
+  return <Badge variant="secondary">Free</Badge>;
+}
+
+function SetPlanDialog({
+  user,
+  onClose,
+}: {
+  user: AdminUserRow;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [plan, setPlan] = useState<PlanTier>(user.plan === "pro" ? "pro" : "pro");
+  const [durationDays, setDurationDays] = useState<string>("365"); // "" = 永久, "-1" = 永久选项 UI
+  const [note, setNote] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      let expires_at: string | null = null;
+      if (plan === "pro" && durationDays && durationDays !== "0") {
+        const d = Number(durationDays);
+        if (Number.isFinite(d) && d > 0) {
+          expires_at = new Date(Date.now() + d * 86400_000).toISOString();
+        }
+      }
+      return adminBillingApi.setPlan(user.user_id, {
+        plan,
+        expires_at,
+        note: note.trim() || null,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      qc.invalidateQueries({ queryKey: ["my-plan"] });
+      onClose();
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : "保存失败"),
+  });
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-[70] flex items-center justify-center p-4"
+    >
+      <button
+        type="button"
+        aria-label="关闭"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+      />
+      <div className="relative w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-2xl">
+        <h3 className="text-lg font-semibold">设置套餐</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          用户 <span className="font-mono">{user.email || user.user_id.slice(0, 8)}</span>
+          {user.display_name && ` · ${user.display_name}`}
+        </p>
+
+        <form
+          className="mt-4 space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setError(null);
+            mutation.mutate();
+          }}
+        >
+          {/* 套餐选择 */}
+          <div className="space-y-1.5">
+            <Label>套餐</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {(["free", "pro"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPlan(p)}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-sm transition",
+                    plan === p
+                      ? p === "pro"
+                        ? "border-amber-500 bg-amber-50 text-amber-800"
+                        : "border-primary bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:border-primary/40",
+                  )}
+                >
+                  {p === "pro" ? (
+                    <span className="flex items-center justify-center gap-1">
+                      <Sparkles className="h-3.5 w-3.5" /> Pro
+                    </span>
+                  ) : (
+                    "Free"
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 有效期 (只在 pro 时展示) */}
+          {plan === "pro" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="dur">有效期</Label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: "7 天", v: "7" },
+                  { label: "30 天", v: "30" },
+                  { label: "90 天", v: "90" },
+                  { label: "1 年", v: "365" },
+                  { label: "永久", v: "" },
+                ].map((opt) => (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    onClick={() => setDurationDays(opt.v)}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs transition",
+                      durationDays === opt.v
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:border-primary/40",
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <Input
+                id="dur"
+                type="number"
+                value={durationDays}
+                onChange={(e) => setDurationDays(e.target.value)}
+                min={0}
+                placeholder="自定义天数 (留空 = 永久)"
+                className="text-sm"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {durationDays && Number(durationDays) > 0
+                  ? `到期时间: ${new Date(Date.now() + Number(durationDays) * 86400_000).toLocaleString("zh-CN")}`
+                  : "永久有效, 不会自动降级."}
+              </p>
+            </div>
+          )}
+
+          {/* 备注 */}
+          <div className="space-y-1.5">
+            <Label htmlFor="note">备注 (可选)</Label>
+            <Textarea
+              id="note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              maxLength={200}
+              placeholder="例: 内测邀请 / 客户合作 / 学校 pilot"
+              className="resize-none"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              取消
+            </Button>
+            <Button type="submit" disabled={mutation.isPending}>
+              {mutation.isPending ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-1.5 h-4 w-4" />
+              )}
+              保存
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

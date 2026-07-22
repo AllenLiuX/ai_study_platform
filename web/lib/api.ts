@@ -21,6 +21,9 @@ import type {
   FollowUp,
   GeneratedAgentSpec,
   Group,
+  MyPlan,
+  PlanTier,
+  QuotaExceededDetail,
   GroupDetail,
   GroupMember,
   CreateGroupRequest,
@@ -83,6 +86,60 @@ async function getAccessToken(): Promise<string | null> {
   return data.session?.access_token ?? null;
 }
 
+// -----------------------------------------------------------------------------
+// 统一错误 & 402 QuotaError (Phase 8)
+// -----------------------------------------------------------------------------
+/**
+ * 402 Payment Required — 免费额度打完了 / 想用 Pro 独占的模型档.
+ *
+ * 后端 detail 是一个结构化对象 (见 QuotaExceededDetail).
+ * 前端可以 `err instanceof QuotaError` 分支处理; 同时我们全局 dispatch
+ * `quota-exceeded` 事件, <UpgradeGate> 一次性 mount 就能收到并弹窗.
+ */
+export class QuotaError extends Error {
+  detail: QuotaExceededDetail;
+  status = 402;
+  constructor(detail: QuotaExceededDetail) {
+    super(detail.message);
+    this.name = "QuotaError";
+    this.detail = detail;
+  }
+}
+
+function isQuotaDetail(d: unknown): d is QuotaExceededDetail {
+  return !!d && typeof d === "object" && "limit_key" in (d as object);
+}
+
+/**
+ * 从 (status, JSON body) 生成合适的错误对象.
+ * - 402 且 body.detail 是结构化 quota detail → QuotaError + 全局 event
+ * - 其他 → Error(detail.message || detail || `请求失败 <code>`)
+ */
+function makeApiError(status: number, body: unknown): Error {
+  // 提取 detail 字段 (FastAPI HTTPException 都塞在 body.detail)
+  const raw =
+    body && typeof body === "object" && "detail" in body
+      ? (body as { detail: unknown }).detail
+      : body;
+
+  if (status === 402 && isQuotaDetail(raw)) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent<QuotaExceededDetail>("quota-exceeded", { detail: raw }),
+      );
+    }
+    return new QuotaError(raw);
+  }
+
+  // 通用 fallback: raw 可能是字符串, 也可能是对象 {message: "..."}
+  let text: string;
+  if (typeof raw === "string") text = raw;
+  else if (raw && typeof raw === "object" && "message" in raw)
+    text = String((raw as { message: unknown }).message);
+  else text = `请求失败 ${status}`;
+  return new Error(text);
+}
+
 /**
  * 普通 REST 请求统一加 20s 超时 — 防止个别请求卡死整个交互
  * (例如 createSession 时 supabase 网络抖动,前面会看到"点了半天没反应")。
@@ -118,14 +175,13 @@ async function request<T>(
       signal: ctrl.signal,
     });
     if (!resp.ok) {
-      let detail: string | undefined;
+      let bodyJson: unknown;
       try {
-        const body = await resp.json();
-        detail = body.detail ?? body.message;
+        bodyJson = await resp.json();
       } catch {
-        // ignore
+        /* ignore */
       }
-      throw new Error(detail || `请求失败 ${resp.status}`);
+      throw makeApiError(resp.status, bodyJson);
     }
     if (resp.status === 204) return undefined as T;
     return (await resp.json()) as T;
@@ -224,14 +280,13 @@ export const chatApi = {
       body: form,
     });
     if (!resp.ok) {
-      let detail = `上传失败 ${resp.status}`;
+      let bodyJson: unknown;
       try {
-        const body = await resp.json();
-        detail = body.detail ?? body.message ?? detail;
+        bodyJson = await resp.json();
       } catch {
-        // ignore
+        /* ignore */
       }
-      throw new Error(detail);
+      throw makeApiError(resp.status, bodyJson);
     }
     return (await resp.json()) as ChatAttachment;
   },
@@ -285,14 +340,13 @@ export const materialsApi = {
       body: form,
     });
     if (!resp.ok) {
-      let detail = `上传失败 ${resp.status}`;
+      let bodyJson: unknown;
       try {
-        const body = await resp.json();
-        detail = body.detail ?? body.message ?? detail;
+        bodyJson = await resp.json();
       } catch {
-        // ignore
+        /* ignore */
       }
-      throw new Error(detail);
+      throw makeApiError(resp.status, bodyJson);
     }
     return (await resp.json()) as Material;
   },
@@ -422,14 +476,13 @@ export const lectureApi = {
       signal: opts.signal,
     });
     if (!resp.ok) {
-      let detail = `转写失败 ${resp.status}`;
+      let bodyJson: unknown;
       try {
-        const body = await resp.json();
-        detail = body.detail ?? body.message ?? detail;
+        bodyJson = await resp.json();
       } catch {
-        // ignore
+        /* ignore */
       }
-      throw new Error(detail);
+      throw makeApiError(resp.status, bodyJson);
     }
     return (await resp.json()) as TranscribeResponse;
   },
@@ -562,15 +615,15 @@ export async function sendMessageStream(
   );
 
   if (!resp.ok || !resp.body) {
-    let detail = `请求失败 ${resp.status}`;
+    let bodyJson: unknown;
     try {
-      const body = await resp.json();
-      detail = body.detail ?? body.message ?? detail;
+      bodyJson = await resp.json();
     } catch {
-      // ignore
+      /* ignore */
     }
-    handlers.onError?.(detail);
-    throw new Error(detail);
+    const err = makeApiError(resp.status, bodyJson);
+    handlers.onError?.(err.message);
+    throw err;
   }
 
   const reader = resp.body.getReader();
@@ -681,4 +734,35 @@ export const adminApi = {
     request<{ users: AdminUserRow[] }>(`/api/admin/users?limit=${limit}`),
   topUsers: (limit: number = 10) =>
     request<{ users: AdminTopUser[] }>(`/api/admin/top-users?limit=${limit}`),
+};
+
+// -----------------------------------------------------------------------------
+// Billing / Entitlements (Phase 8)
+// -----------------------------------------------------------------------------
+export const billingApi = {
+  /** 当前登录用户的 plan + 各项限额 + 当前用量 */
+  myPlan: () => request<MyPlan>("/api/me/plan"),
+};
+
+// Admin: 给指定用户设 plan (需 admin 权限)
+export const adminBillingApi = {
+  setPlan: (
+    userId: string,
+    payload: {
+      plan: PlanTier;
+      expires_at?: string | null;
+      note?: string | null;
+    },
+  ) =>
+    request<{
+      user_id: string;
+      plan: PlanTier;
+      raw_plan: PlanTier;
+      expires_at: string | null;
+      granted_at: string | null;
+      note: string | null;
+    }>(`/api/admin/users/${userId}/plan`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

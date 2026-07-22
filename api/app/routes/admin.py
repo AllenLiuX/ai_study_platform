@@ -17,11 +17,14 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime as _dt
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 
 from ..core.auth import CurrentUser, get_current_user
 from ..core.config import get_settings
 from ..db.supabase_client import get_admin_client
+from ..services import entitlements as ents
 
 logger = logging.getLogger(__name__)
 
@@ -396,11 +399,15 @@ async def list_users(
     notes_by_uid = _count_per_user("knowledge_notes")
     mats_by_uid = _count_per_user("learning_materials")
 
+    # Phase 8: 批量取 plan
+    plans_by_uid = ents.list_plans_by_user_ids(uids)
+
     out = []
     for u in users:
         uid = u.get("id")
         prof = prof_by_uid.get(uid) or {}
         meta = u.get("user_metadata") or {}
+        p = plans_by_uid.get(uid)
         out.append(
             {
                 "user_id": uid,
@@ -412,6 +419,10 @@ async def list_users(
                 "grade": prof.get("grade"),
                 "school": prof.get("school"),
                 "learning_goal": prof.get("learning_goal"),
+                "plan": p.plan if p else "free",
+                "plan_expires_at": (
+                    p.expires_at.isoformat() if p and p.expires_at else None
+                ),
                 "created_at": (
                     u["created_at"].isoformat()
                     if isinstance(u.get("created_at"), datetime)
@@ -502,3 +513,51 @@ async def top_users(
             }
         )
     return {"users": out}
+
+
+# -----------------------------------------------------------------------------
+# POST /admin/users/{uid}/plan — 给指定用户开/关 Pro
+# -----------------------------------------------------------------------------
+@router.post("/users/{target_user_id}/plan")
+async def set_user_plan(
+    target_user_id: str,
+    body: dict = Body(...),
+    admin: CurrentUser = Depends(require_admin),
+) -> dict:
+    """管理员给指定用户设置 plan.
+
+    body 格式:
+      { "plan": "free" | "pro",
+        "expires_at": "2026-12-31T23:59:59Z" | null,  # 可选, null 表示永不过期
+        "note": "reason" | null }
+    """
+    plan = str(body.get("plan") or "").strip().lower()
+    if plan not in ("free", "pro"):
+        raise HTTPException(status_code=400, detail="plan 必须是 'free' 或 'pro'")
+
+    exp_raw = body.get("expires_at")
+    expires_at: _dt | None = None
+    if exp_raw:
+        try:
+            expires_at = _dt.fromisoformat(str(exp_raw).replace("Z", "+00:00"))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"expires_at 需为 ISO8601, e.g. 2026-12-31T23:59:59Z ({exc})",
+            ) from exc
+
+    info = ents.set_plan(
+        user_id=target_user_id,
+        plan=plan,  # type: ignore[arg-type]
+        granted_by=admin.id,
+        expires_at=expires_at,
+        note=(str(body.get("note")) if body.get("note") else None),
+    )
+    return {
+        "user_id": target_user_id,
+        "plan": info.plan,
+        "raw_plan": info.raw_plan,
+        "expires_at": info.expires_at.isoformat() if info.expires_at else None,
+        "granted_at": info.granted_at.isoformat() if info.granted_at else None,
+        "note": info.note,
+    }

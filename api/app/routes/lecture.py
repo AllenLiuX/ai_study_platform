@@ -102,6 +102,10 @@ async def save_lecture_as_note(
 
     后台异步做 embed 索引;前端可用 chunk_status 轮询直到 'ready'。
     """
+    # Phase 8 · Billing: 免费用户每日听课笔记数限额
+    from ..services import entitlements as ents
+    ents.enforce("lecture_notes_per_day", user.id)
+
     row = await notes_service.generate_note_from_transcript(
         owner_id=user.id,
         transcript=payload.transcript,

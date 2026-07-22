@@ -68,6 +68,10 @@ async def create_group(
     user: CurrentUser = Depends(get_current_user),
 ) -> Group:
     """创建群组。创建者自动成为 owner,系统生成 8 位 invite_code。"""
+    # Phase 8 · Billing: 免费用户无法创建群 (limit=0)
+    from ..services import entitlements as ents
+    ents.enforce("groups_created_total", user.id)
+
     row = repos.create_group(
         owner_id=user.id,
         payload={

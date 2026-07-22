@@ -65,6 +65,10 @@ async def upload_material(
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名缺失")
 
+    # Phase 8 · Billing: 免费用户资料库总数限额
+    from ..services import entitlements as ents
+    ents.enforce("materials_total", user.id)
+
     # Phase 7: 若指定 group_id, 必须是该群成员才能上传
     if group_id:
         if not repos.get_group_member(group_id, user.id):

@@ -171,6 +171,11 @@ async def send_message(
     - done:      {"length": N, "citation_count": M}
     - error:     {"message": "..."}
     """
+    # Phase 8 · Billing: 免费用户每日消息数 + 模型档位限制
+    from ..services import entitlements as ents
+    ents.enforce("chat_messages_per_day", user.id)
+    ents.enforce_model_tier(user.id, payload.model_tier)
+
     profile = repos.get_profile(user.id)
     return StreamingResponse(
         chat_service.stream_assistant_reply(
