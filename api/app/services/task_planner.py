@@ -27,10 +27,11 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import date
+from collections import Counter
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from ..agents.registry import all_agents
+from ..agents.registry import all_builtin_agents
 from ..core.llm import ModelTier, build_chat_kwargs, get_client, resolve_model
 from ..db import repos
 from ..db.supabase_client import get_admin_client
@@ -39,54 +40,64 @@ logger = logging.getLogger(__name__)
 
 MAX_TASKS = 3
 MIN_TASKS = 2  # 至少生成 2 条才算成功
-ALLOWED_AGENT_TYPES = {a.agent_type for a in all_agents()}
 ALLOWED_TAGS = {"薄弱", "复习", "新学", "规划"}
+# 学科 → 兜底 label (仅在 agent 元数据缺失 subject_name 时用)
 SUBJECT_LABEL_BY_ID = {
     "math": "数学",
     "english": "英语",
     "chinese": "语文",
 }
-AGENT_BY_SUBJECT = {
-    "math": "math_teacher",
-    "english": "english_teacher",
-    "chinese": "chinese_teacher",
-}
+# 近 N 天的会话认为是"最近在学",用于计算老师池排序 + 冷却
+RECENT_WINDOW_DAYS = 14
+# 老师超过 N 天没互动,不主动推荐 (除非池子里只有它)
+STALE_AGENT_DAYS = 30
 
 
-SYSTEM_PROMPT = """你是「学习驾驶舱」的 AI 班主任,专门为初/高中学生设计「今日 3 件事」。
-学生每天打开 App 时看到的就是你给的 3 条任务清单 —— 必须让他点开就能开始学,不要再自己想"今天该做什么"。
+SYSTEM_PROMPT = """你是「学习驾驶舱」的 AI 学习教练,为学生设计「今日 3 件事」。
+学生打开 App 就能看到这 3 条,点一下就进入对应老师开始学 —— 你要让他不用自己想"今天该做什么"。
 
-设计原则:
-1. **数量恰好 3 条**,按推荐优先级降序。
-2. **多样性**:必须覆盖以上 2 个学科或主题,不能 3 条都是同一学科;
-   - 若学生有薄弱学科,**第 1 条必须是该学科的「薄弱知识点精准训练」**;
-   - 至少 1 条 tag="规划",由「AI 班主任」(agent_type=head_teacher) 承接,用于反思/调整;
-   - 其余 1 条可以是「新学」或「复习」(已学到一定章节后做巩固)。
-3. **极致具体,不要空话**:
-   - 错误示例:"复习数学" / "学英语"
-   - 正确示例:"用配方法订正 3 道二次函数顶点题" / "把 unit 5 的 8 个动词不规则过去式过一遍"
-4. **starter_prompt**:就是学生点开任务后,AI 老师收到的第一句话,**用学生第一人称、口语化**,
-   要让老师立刻知道"要讲什么 / 出什么题 / 复盘什么";最好引用一个具体知识点或场景。
-5. **estimated_minutes** 控制在 5-30 之间,符合任务真实工作量。
-6. **tag 严格四选一**:薄弱 / 复习 / 新学 / 规划。
-7. **agent_type 严格四选一**:head_teacher / math_teacher / english_teacher / chinese_teacher,
-   且必须和 subject_label / subject_id 一致 (head_teacher 对应 subject_label="学习规划"、subject_id=null)。
-8. 若提供了 knowledge_point_ids 候选,优先在任务里关联 1 个 (写到 knowledge_point_ids 数组),
-   不要编造不存在的 id。
+# 核心排序原则 (从高到低)
+1. **学生的学习目标 (learning_goal) 是主线** —— 每条任务都应可解释为"这一步在朝目标推进"。
+2. **优先延续最近在跟的老师** —— 学生最近哪个老师用得多、上次聊到哪儿,就顺着往下推。
+   突然塞一个 30 天没互动的老师 (数据里会标注 [长期未用]) 是**打断学习节奏**,除非老师池里只剩它。
+3. **不强制学科多样性**:如果学生的目标本来就聚焦在一个方向 (如"准备量化面试"),
+   3 条都是同一位老师 / 同一主线也 OK。**贴近目标 > 表面上"看起来均衡"**。
 
-输出必须是合法 JSON,结构:
+# 硬约束
+- **agent_type 只能从下方"可推荐老师池"里选**,不允许出现池外的 key。
+- 池里标 [长期未用] 的老师默认**不用**,除非它是唯一选项。
+- **规划任务 (tag="规划" 由 head_teacher 承接) 改成条件推荐,不再强制**:
+  - 当学生学习目标模糊 / 无进展 / 长期停滞 / 需要复盘 / 计划到期时才加 1 条;
+  - 否则**优先把 3 个名额都给学科/专业推进,不要凑数**。
+
+# 任务本身的质量要求
+- 数量恰好 3 条 (若老师池只允许更少多样性,重复同一位老师也可,但内容不能重复)。
+- **极致具体,不要空话**:
+  - ❌ "复习数学" / "继续学面试"
+  - ✅ "用配方法订正 3 道二次函数顶点题" / "手推一次 Adam 优化器的偏差修正公式"
+- **starter_prompt** = 学生点开任务后 AI 老师收到的第一句话,**用学生第一人称口语化**,
+  要让老师立刻知道要讲什么 / 出什么题 / 复盘什么;引用具体知识点或场景。
+- **estimated_minutes** 5-30 之间,符合真实工作量。
+- **tag 严格四选一**:薄弱 / 复习 / 新学 / 规划。
+- **subject_label / subject_id** 从老师池对应老师的元数据里取:
+  - 平台 K12 老师 (数学/英语/语文) 用其固定学科;
+  - 自定义老师若无 subject_id,`subject_id=null`,`subject_label` 直接用**该老师的 display_name**
+    (例如老师叫"量化MLE导师",subject_label 就写"量化MLE导师")。
+- 若提供了 knowledge_point_ids 候选,可关联 1 个到任务里 (只用池里给的 id,别编造)。
+
+输出必须是合法 JSON:
 {
   "tasks": [
     {
       "title": "<≤16 字>",
       "description": "<≤80 字>",
-      "subject_label": "数学 | 英语 | 语文 | 学习规划",
-      "subject_id": "math | english | chinese | null",
-      "agent_type": "head_teacher | math_teacher | english_teacher | chinese_teacher",
+      "subject_label": "<平台学科名 或 自定义老师 display_name>",
+      "subject_id": "<math | english | chinese | null>",
+      "agent_type": "<必须是老师池里的 agent_key>",
       "estimated_minutes": 5..30,
       "tag": "薄弱 | 复习 | 新学 | 规划",
       "starter_prompt": "<≤80 字,学生第一人称>",
-      "knowledge_point_ids": ["..."]   // 可空数组
+      "knowledge_point_ids": ["..."]
     }
   ]
 }
@@ -100,18 +111,24 @@ USER_PROMPT_TEMPLATE = """今天是 {today} ({weekday}),请为该学生生成今
 - 年级: {grade}
 - 目标考试: {target_exam}
 - 关注学科: {focus_subjects}
-- 学习目标: {learning_goal}
+- **学习目标 (主线)**: {learning_goal}
 
-【各学科最新进度】
-{progress_block}
+【可推荐老师池 (按近 14 天互动次数降序,只能从这里选 agent_type)】
+{agent_pool_block}
 
-【最近 7 天的对话痕迹 (避免重复推荐)】
+【最近对话主线 (体现学生正在深挖什么;优先延续,不要打断)】
 {recent_sessions_block}
+
+【各学科 K12 进度 (仅当老师池含 K12 老师时相关;非 K12 目标可忽略)】
+{progress_block}
 
 【可关联的薄弱知识点候选 (id: 名称, mastery)】
 {weak_kp_block}
 
-请严格按系统提示输出 JSON。"""
+请严格按系统提示输出 JSON。特别注意:
+- 3 条任务都要能说清"这一步怎么帮学习目标『{learning_goal_short}』往前推 1 步"。
+- agent_type **只能**从上面老师池选,**不要**用池外的 key。
+- 如果学生最近 30 天没和某位老师互动 (标 [长期未用]),**不要**主动推荐它。"""
 
 
 WEEKDAYS_CN = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -132,15 +149,37 @@ def _format_progress(progress: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _format_recent_sessions(sessions: list[dict]) -> str:
+def _format_recent_sessions(
+    sessions: list[dict], agent_name_by_key: dict[str, str] | None = None
+) -> str:
     if not sessions:
         return "(无,这是学生第一次使用)"
     lines = []
-    for s in sessions[:5]:
-        title = (s.get("title") or "(无标题)").strip()[:30]
-        agent = s.get("agent_type", "?")
-        updated = (s.get("updated_at") or "")[:10]
-        lines.append(f"- [{updated}] {agent}: {title}")
+    for s in sessions[:8]:
+        title = (s.get("title") or "(无标题)").strip()[:40]
+        akey = s.get("agent_type", "?")
+        aname = (agent_name_by_key or {}).get(akey, akey)
+        updated = (s.get("updated_at") or s.get("created_at") or "")[:10]
+        lines.append(f"- [{updated}] {aname} ({akey}): {title}")
+    return "\n".join(lines)
+
+
+def _format_agent_pool(agent_pool: list[dict]) -> str:
+    """按最近互动降序输出老师池;标注 [长期未用] 供 LLM 决策。"""
+    if not agent_pool:
+        return "(空,没有可用老师)"
+    lines = []
+    for a in agent_pool:
+        count = a["recent_session_count"]
+        last = a.get("last_used_date") or "从未"
+        stale_tag = " [长期未用]" if a.get("is_stale") else ""
+        owner = "自定义" if a["owner_type"] == "user" else "平台"
+        tagline = a.get("tagline") or a.get("role") or ""
+        subj = f", subject_id={a.get('subject_id')}" if a.get("subject_id") else ""
+        lines.append(
+            f"- agent_key={a['agent_key']} | {a['display_name']} ({owner}{subj}) "
+            f"| 近14天{count}次 · 上次{last}{stale_tag}\n    简介: {tagline[:60]}"
+        )
     return "\n".join(lines)
 
 
@@ -215,8 +254,16 @@ def _default_tasks() -> list[dict]:
     ]
 
 
-def _validate_task(item: dict, valid_kp_ids: set[str]) -> dict | None:
-    """校验单条任务,不合法返回 None。"""
+def _validate_task(
+    item: dict,
+    valid_kp_ids: set[str],
+    agent_meta_by_key: dict[str, dict],
+) -> dict | None:
+    """校验单条任务,不合法返回 None。
+
+    Phase 6.x: agent_type 白名单从 dynamic 老师池取 (含用户自定义);
+    subject_id / subject_label 也从老师元数据推,不再 K12 硬编码。
+    """
     try:
         title = (item.get("title") or "").strip()
         description = (item.get("description") or "").strip()
@@ -232,23 +279,30 @@ def _validate_task(item: dict, valid_kp_ids: set[str]) -> dict | None:
 
         if not title or not description or not starter_prompt:
             return None
-        if agent_type not in ALLOWED_AGENT_TYPES:
+        if agent_type not in agent_meta_by_key:
             return None
         if tag not in ALLOWED_TAGS:
             return None
 
-        # 学科一致性
+        # 学科 & label 一致性:从老师池元数据推
+        meta = agent_meta_by_key[agent_type]
+        canonical_subject_id = meta.get("subject_id")
         if agent_type == "head_teacher":
             subject_id = None
-            subject_label = "学习规划"
-        elif agent_type in AGENT_BY_SUBJECT.values():
-            inferred = next(
-                (sid for sid, agent in AGENT_BY_SUBJECT.items() if agent == agent_type),
-                None,
+            subject_label = subject_label or "学习规划"
+        elif canonical_subject_id:
+            subject_id = canonical_subject_id
+            # K12 学科用固定 label,其它情况允许 LLM 提供的 label 或 fallback display_name
+            subject_label = (
+                SUBJECT_LABEL_BY_ID.get(canonical_subject_id)
+                or subject_label
+                or meta.get("display_name")
+                or ""
             )
-            if subject_id != inferred:
-                subject_id = inferred
-            subject_label = SUBJECT_LABEL_BY_ID.get(subject_id or "", subject_label)
+        else:
+            # 自定义老师:subject_id 强制 null,label 用 display_name 兜底
+            subject_id = None
+            subject_label = subject_label or meta.get("display_name") or "专项"
 
         try:
             minutes_int = int(minutes)
@@ -267,7 +321,7 @@ def _validate_task(item: dict, valid_kp_ids: set[str]) -> dict | None:
             "id": str(uuid.uuid4()),
             "title": title[:24],
             "description": description[:160],
-            "subject_label": subject_label,
+            "subject_label": subject_label[:20],
             "subject_id": subject_id,
             "agent_type": agent_type,
             "estimated_minutes": minutes_int,
@@ -303,6 +357,86 @@ async def _call_llm(*, system_prompt: str, user_prompt: str) -> dict:
         return {"data": {}, "model": model}
 
 
+def _build_agent_pool(student_id: str, recent_sessions: list[dict]) -> list[dict]:
+    """构建"可推荐老师池"= 平台 4 个 + 用户自定义,附带最近使用统计。
+
+    排序:近 14 天 session_count 降序 → 上次使用日期降序 → display_name。
+    对于 30 天没用过的老师,打 is_stale=True 让 LLM 默认不推。
+    """
+    now = datetime.now(timezone.utc)
+    recent_cutoff = (now - timedelta(days=RECENT_WINDOW_DAYS)).date().isoformat()
+    stale_cutoff = (now - timedelta(days=STALE_AGENT_DAYS)).date().isoformat()
+
+    counts: Counter = Counter()
+    last_used: dict[str, str] = {}
+    for s in recent_sessions:
+        akey = s.get("agent_type")
+        if not akey:
+            continue
+        upd = (s.get("updated_at") or s.get("created_at") or "")[:10]
+        if upd and upd >= recent_cutoff:
+            counts[akey] += 1
+        if upd and (akey not in last_used or upd > last_used[akey]):
+            last_used[akey] = upd
+
+    # 拉可见老师列表 (平台 + 该 owner 私有);DB 挂了就退化用 hardcoded builtin
+    try:
+        rows = repos.list_user_agents(owner_id=student_id)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("list_user_agents 失败,退化到 hardcoded builtin: %s", exc)
+        rows = []
+
+    pool: list[dict] = []
+    seen: set[str] = set()
+    for r in rows:
+        akey = r.get("agent_key")
+        if not akey or akey in seen:
+            continue
+        seen.add(akey)
+        last_dt = last_used.get(akey)
+        pool.append(
+            {
+                "agent_key": akey,
+                "display_name": r.get("display_name") or akey,
+                "tagline": r.get("tagline") or "",
+                "role": r.get("role") or "",
+                "subject_id": r.get("subject_id"),
+                "owner_type": r.get("owner_type") or "platform",
+                "recent_session_count": counts.get(akey, 0),
+                "last_used_date": last_dt,
+                "is_stale": bool(last_dt) and last_dt < stale_cutoff,
+            }
+        )
+
+    # DB 拿不到时,用 hardcoded 4 个内置老师兜底
+    if not pool:
+        for a in all_builtin_agents():
+            last_dt = last_used.get(a.agent_type)
+            pool.append(
+                {
+                    "agent_key": a.agent_type,
+                    "display_name": a.display_name,
+                    "tagline": a.tagline,
+                    "role": a.role,
+                    "subject_id": a.subject_id,
+                    "owner_type": "platform",
+                    "recent_session_count": counts.get(a.agent_type, 0),
+                    "last_used_date": last_dt,
+                    "is_stale": bool(last_dt) and last_dt < stale_cutoff,
+                }
+            )
+
+    # 排序:最近用得多 > 上次日期近 > 名字
+    pool.sort(
+        key=lambda a: (
+            -a["recent_session_count"],
+            -(int(a["last_used_date"].replace("-", "")) if a["last_used_date"] else 0),
+            a["display_name"],
+        )
+    )
+    return pool
+
+
 def _build_context(student_id: str) -> dict[str, Any]:
     profile = repos.get_profile(student_id) or {}
     subjects = repos.list_subjects()
@@ -325,11 +459,14 @@ def _build_context(student_id: str) -> dict[str, Any]:
                 "weak_points": weak,
             }
         )
-    recent_sessions = repos.list_sessions(student_id, limit=8)
+    # ↑ limit 从 8 提到 20 让老师使用频率统计更准
+    recent_sessions = repos.list_sessions(student_id, limit=20)
+    agent_pool = _build_agent_pool(student_id, recent_sessions)
     return {
         "profile": profile,
         "progress": progress,
         "recent_sessions": recent_sessions,
+        "agent_pool": agent_pool,
     }
 
 
@@ -343,10 +480,14 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
     progress = ctx["progress"]
     profile = ctx["profile"]
     recent_sessions = ctx["recent_sessions"]
+    agent_pool = ctx["agent_pool"]
 
-    # 判断是否新用户:所有学科 covered_count 都是 0
-    is_new_user = all((p.get("covered_count") or 0) == 0 for p in progress)
-    if is_new_user and not recent_sessions:
+    # 判断是否新用户:所有学科 covered_count 都是 0 且从没聊过
+    is_new_user = (
+        all((p.get("covered_count") or 0) == 0 for p in progress)
+        and not recent_sessions
+    )
+    if is_new_user:
         logger.info("学生 %s 为全新用户,使用默认任务", student_id)
         return {
             "tasks": _default_tasks(),
@@ -357,6 +498,11 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
     weak_kps = _collect_weak_kps(progress)
     valid_kp_ids = {w["knowledge_point_id"] for w in weak_kps if w.get("knowledge_point_id")}
 
+    # 老师池 → dict for O(1) 查找 + prompt 展示
+    agent_meta_by_key = {a["agent_key"]: a for a in agent_pool}
+    agent_name_by_key = {k: v["display_name"] for k, v in agent_meta_by_key.items()}
+
+    learning_goal = (profile.get("learning_goal") or "").strip() or "未填"
     weekday = WEEKDAYS_CN[today.weekday()]
     user_prompt = USER_PROMPT_TEMPLATE.format(
         today=today.isoformat(),
@@ -365,9 +511,13 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
         grade=profile.get("grade") or "未填",
         target_exam=profile.get("target_exam") or "未填",
         focus_subjects=", ".join(profile.get("focus_subjects") or []) or "未填",
-        learning_goal=profile.get("learning_goal") or "未填",
+        learning_goal=learning_goal,
+        learning_goal_short=learning_goal[:40],
+        agent_pool_block=_format_agent_pool(agent_pool),
+        recent_sessions_block=_format_recent_sessions(
+            recent_sessions, agent_name_by_key
+        ),
         progress_block=_format_progress(progress),
-        recent_sessions_block=_format_recent_sessions(recent_sessions),
         weak_kp_block=_format_weak_kps(weak_kps),
     )
 
@@ -385,7 +535,7 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
     valid_tasks: list[dict] = []
     seen_titles: set[str] = set()
     for item in raw_items[:MAX_TASKS]:
-        t = _validate_task(item, valid_kp_ids)
+        t = _validate_task(item, valid_kp_ids, agent_meta_by_key)
         if not t:
             continue
         if t["title"] in seen_titles:
@@ -403,17 +553,8 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
             "model": llm_out.get("model"),
         }
 
-    # 后处理:确保至少有 1 条 head_teacher (规划) 任务
-    if not any(t["agent_type"] == "head_teacher" for t in valid_tasks):
-        # 把最后一条改成班主任规划
-        last = valid_tasks[-1]
-        valid_tasks[-1] = {
-            **last,
-            "agent_type": "head_teacher",
-            "subject_id": None,
-            "subject_label": "学习规划",
-            "tag": "规划",
-        }
+    # 注意:不再强制"至少 1 条 head_teacher"。如果学生目标聚焦、正在深挖一位老师,
+    # 3 条都围绕主线是合理的;规划任务由 SYSTEM_PROMPT 里的条件规则决定。
 
     return {
         "tasks": valid_tasks[:MAX_TASKS],
@@ -422,6 +563,10 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
             "weak_kp_count": len(weak_kps),
             "subjects_with_progress": [
                 p["subject_id"] for p in progress if (p.get("covered_count") or 0) > 0
+            ],
+            "agent_pool_size": len(agent_pool),
+            "recent_agent_keys": [
+                a["agent_key"] for a in agent_pool if a["recent_session_count"] > 0
             ],
         },
         "model": llm_out.get("model"),
