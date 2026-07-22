@@ -225,6 +225,83 @@ export interface Material {
 }
 
 // -----------------------------------------------------------------------------
+// Phase 7.1: Admin dashboard
+// -----------------------------------------------------------------------------
+export interface AdminMe {
+  is_admin: boolean;
+  email: string | null;
+}
+
+export interface AdminOverview {
+  generated_at: string;
+  users: {
+    total: number;
+    active_today: number;
+    active_week: number;
+    active_month: number;
+  };
+  content: {
+    chat_messages_total: number;
+    chat_messages_today: number;
+    chat_sessions_total: number;
+    materials_total: number;
+    materials_student_total: number;
+    notes_total: number;
+    practice_sessions_total: number;
+    groups_total: number;
+    group_members_total: number;
+  };
+}
+
+export interface AdminTrendPoint {
+  date: string;
+  new_users: number;
+  messages: number;
+  notes: number;
+}
+
+export interface AdminTrend {
+  days: number;
+  series: AdminTrendPoint[];
+}
+
+export interface AdminBreakdownItem {
+  key: string;
+  count: number;
+}
+
+export interface AdminBreakdown {
+  notes_by_source: AdminBreakdownItem[];
+  materials_by_type: AdminBreakdownItem[];
+  materials_by_owner_type: AdminBreakdownItem[];
+  messages_by_agent: AdminBreakdownItem[];
+  groups_by_visibility: AdminBreakdownItem[];
+  practice_by_status: AdminBreakdownItem[];
+}
+
+export interface AdminUserRow {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  grade: string | null;
+  school: string | null;
+  learning_goal: string | null;
+  created_at: string | null;
+  last_sign_in_at: string | null;
+  messages: number;
+  notes: number;
+  materials: number;
+}
+
+export interface AdminTopUser {
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  grade: string | null;
+  messages_30d: number;
+}
+
+// -----------------------------------------------------------------------------
 // Phase 7: 群组 / 班级
 // -----------------------------------------------------------------------------
 export type GroupRole = "owner" | "admin" | "member";

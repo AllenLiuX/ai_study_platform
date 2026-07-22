@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .core.config import get_settings
+from .routes import admin as admin_route
 from .routes import agents as agents_route
 from .routes import chat as chat_route
 from .routes import groups as groups_route
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(practice_route.router, prefix="/api")
     app.include_router(lecture_route.router, prefix="/api")
     app.include_router(groups_route.router, prefix="/api")
+    app.include_router(admin_route.router, prefix="/api")
 
     # 全局兜底: 未捕获异常 (含 postgrest APIError / 数据库表缺失等) 走这里,
     # 返回 JSON + CORS 头, 前端能拿到人话错误 (否则浏览器只显示 "Failed to fetch")

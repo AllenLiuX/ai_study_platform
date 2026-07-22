@@ -3,6 +3,7 @@
 import {
   GraduationCap,
   Headphones,
+  LayoutDashboard,
   Library,
   Loader2,
   LogOut,
@@ -18,7 +19,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { chatApi } from "@/lib/api";
+import { adminApi, chatApi } from "@/lib/api";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -40,17 +41,36 @@ export function AppHeader({ className }: AppHeaderProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [email, setEmail] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
     supabase.auth.getUser().then(({ data }) => {
       setEmail(data.user?.email ?? null);
     });
+    // 只有登录后再查一次是否 admin, 结果缓存在 sessionStorage 里避免每次导航都请求
+    (async () => {
+      try {
+        const cached = sessionStorage.getItem("__is_admin__");
+        if (cached === "1") setIsAdmin(true);
+        else if (cached === "0") return;
+        const me = await adminApi.me();
+        setIsAdmin(!!me.is_admin);
+        sessionStorage.setItem("__is_admin__", me.is_admin ? "1" : "0");
+      } catch {
+        /* 未登录 / 网络失败 → 保持默认 false */
+      }
+    })();
   }, []);
 
   async function handleLogout() {
     const supabase = createSupabaseBrowserClient();
     await supabase.auth.signOut();
+    try {
+      sessionStorage.removeItem("__is_admin__");
+    } catch {
+      /* 忽略 */
+    }
     router.replace("/login");
     router.refresh();
   }
@@ -83,6 +103,22 @@ export function AppHeader({ className }: AppHeaderProps) {
         );
       })}
       <ChatNavButton active={chatActive} compact={compact} />
+      {isAdmin && (
+        <Link
+          href="/admin"
+          className={cn(
+            "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition",
+            compact && "px-3 py-1",
+            pathname?.startsWith("/admin")
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+          )}
+          title="产品后台看板 (仅管理员可见)"
+        >
+          <LayoutDashboard className="h-3.5 w-3.5" />
+          后台
+        </Link>
+      )}
     </>
   );
 

@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     backend_port: int = Field(default=8000, alias="BACKEND_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
+    # Phase 7.1: 平台管理员邮箱白名单 (逗号分隔), 只有这些邮箱能访问 /api/admin/*
+    admin_emails: str = Field(default="", alias="ADMIN_EMAILS")
+
+    @property
+    def admin_emails_list(self) -> list[str]:
+        return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [

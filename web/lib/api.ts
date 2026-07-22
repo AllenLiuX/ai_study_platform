@@ -12,6 +12,12 @@ import type {
   DailyTasksResponse,
   DashboardResponse,
   FinishSessionResponse,
+  AdminBreakdown,
+  AdminMe,
+  AdminOverview,
+  AdminTopUser,
+  AdminTrend,
+  AdminUserRow,
   FollowUp,
   GeneratedAgentSpec,
   Group,
@@ -660,4 +666,19 @@ export const groupsApi = {
     request<void>(`/api/groups/${groupId}/members/${userId}`, {
       method: "DELETE",
     }),
+};
+
+// -----------------------------------------------------------------------------
+// Admin (Phase 7.1: 产品后台看板)
+// -----------------------------------------------------------------------------
+export const adminApi = {
+  /** 任何登录用户可调, 用于前端条件展示"后台"入口 */
+  me: () => request<AdminMe>("/api/admin/me"),
+  overview: () => request<AdminOverview>("/api/admin/overview"),
+  trend: (days: number = 30) => request<AdminTrend>(`/api/admin/trend?days=${days}`),
+  breakdown: () => request<AdminBreakdown>("/api/admin/breakdown"),
+  users: (limit: number = 50) =>
+    request<{ users: AdminUserRow[] }>(`/api/admin/users?limit=${limit}`),
+  topUsers: (limit: number = 10) =>
+    request<{ users: AdminTopUser[] }>(`/api/admin/top-users?limit=${limit}`),
 };
