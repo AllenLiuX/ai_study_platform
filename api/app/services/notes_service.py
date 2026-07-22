@@ -629,42 +629,40 @@ async def generate_note_from_practice(
 # Phase 6.2: 听课转写 → 复习笔记 (复用同一 LLM 蒸馏管线)
 # =============================================================================
 
-_NOTE_FROM_LECTURE_SYSTEM = """你是一个 AI 学习平台的"课堂录音复习笔记助手"。
-学生刚上完一节课,把整堂课的音频用 Whisper 转成了一份原始转写文本
-(可能有识别错字 / 断句奇怪 / 老师口头禅"这个""就是"等)。
-你要把这段转写蒸馏成一份**面向复习的知识点笔记**,让学生课后翻这份笔记
-就能快速回顾本节课学到什么、老师强调了什么、哪些是易错点。
+_NOTE_FROM_LECTURE_SYSTEM = """你是一个 AI 学习平台的"音频转写复习笔记助手"。
+用户刚录完一段音频(可能是学校课堂 / 网课 / 讲座 / 直播 / 播客 / 会议 / 访谈
+/ 视频教程等任何形式),把原始音频用 ASR 转成了一份纯文本 (含时间戳 [MM:SS],
+可能有识别错字 / 断句奇怪 / 说话人口头禅 "这个""就是"等)。
 
-规则:
-- title 体现本节课的核心主题,例如:"高一物理:自由落体运动的规律与例题"、
-  "线性代数:矩阵秩与线性方程组解的结构"
-- summary 一句话 (≤ 50 字):本节课学了什么 + 最重要的 take-away
-- content 是 markdown 正文,按知识点组织 (不要按时间线!),推荐结构:
-    ## 一、核心概念/定义
-    - 概念名 + 精炼定义 (用自己的话,别直接抄转写)
-    - 关键公式 / 定理 (可用 LaTeX $...$ / $$...$$)
+你要把这段转写蒸馏成一份**面向复用的学习笔记**,让用户日后翻这份笔记
+就能快速回顾核心内容、要点、金句 / 关键结论、可执行的 take-away。
 
-    ## 二、重要推导 / 证明思路
-    - 老师讲的推导要点,只保留骨架和关键 insight
+## 规则
+- 首先自己判断这是什么类型的内容 (学科课 / 直播带货 / 商业访谈 / 播客 / …),
+  按最贴合的结构组织正文,不要生搬硬套一个模板。
+- title 一句话点出核心主题,例如:
+  - 学科课:"高一物理:自由落体运动的规律与例题"
+  - 带货直播:"XX 主播美妆专场话术拆解 & 爆款推荐节奏"
+  - 商业访谈:"YY 谈量化对冲基金的风控框架"
+  - 播客:"关于 SaaS 定价的三个反直觉观点"
+- summary 一句话 (≤ 50 字):这段音频最值得记住的一件事
+- content 是 markdown 正文 (≤ 3000 字,可含 LaTeX $...$ / $$...$$)。
+  **不要照搬原转写** — 要重新组织、精炼、去口头禅和识别错字;
+  按内容类型灵活组织,常见结构可参考:
+  - 学科/知识型: 概念 → 推导/原理 → 例题 → 易错点 → 复习清单
+  - 直播/带货: 开场话术 → 产品切入节奏 → 卖点组合 → 促单话术 → 可复用套路
+  - 访谈/播客: 核心观点 → 支撑论据 → 反驳/case → 值得深挖的问题
+  - 会议/复盘: 决策 → 依据 → 未决 → 行动项
+- 如果用户提供了"关注角度",严格按那个视角侧重,避免写他不关心的部分
+- 如果指定了"扮演的老师",用该老师的知识面和讲解风格来组织笔记
+  (比如"带货直播分析师"会更关注话术套路而非产品参数)
+- tags 3-8 个,与内容领域紧密相关,不要 "听课""音频"这类 meta 标签
+- **只有在原始转写完全为空 (< 50 字) / 只有噪音字符 / 完全无语义** 时
+  才设 insufficient=true。护肤品广告 / 直播带货 / 闲聊 / 播客都算合法内容,
+  务必尝试蒸馏,不要因为"这不像上课"就拒绝
 
-    ## 三、典型例题
-    - 老师课上讲过的例题:题目 → 关键步骤 → 结论
-    - 只保留最有代表性的 2-3 道
-
-    ## 四、老师强调的易错点
-    - ⚠️ "常见坑" + 为什么错
-
-    ## 五、复习清单
-    - [ ] 需要重点复习的知识点
-    - [ ] 可以自己动手推导一次的公式 / 例题
-
-  正文 ≤ 3000 字,可含 LaTeX。**不要照搬原转写** — 要重新组织、精炼、去口头禅
-  和识别错字。老师如果只是闲聊 / 布置作业等和知识无关的段落,直接跳过不写。
-- tags 给 3-8 个标签 (学科 + 章节 + 知识点,不要"听课"这类 meta 标签)
-- 如果转写内容太少 / 大部分是噪音或闲聊 / 完全抽不出可复习的知识点,
-  设 insufficient=true 并简要说明原因
-
-严格输出 JSON,不要 markdown 代码块包裹。字段:title / summary / content / tags / insufficient (bool) / insufficient_reason?
+严格输出 JSON,不要 markdown 代码块包裹。
+字段:title / summary / content / tags / insufficient (bool) / insufficient_reason?
 """
 
 
@@ -674,6 +672,7 @@ async def generate_note_from_transcript(
     transcript: str,
     title_hint: str | None = None,
     agent_key: str | None = None,
+    focus_hint: str | None = None,
     parent_id: str | None = None,
     tags_override: list[str] | None = None,
     keep_raw_transcript: bool = True,
@@ -689,10 +688,41 @@ async def generate_note_from_transcript(
 
     raw = transcript.strip()
 
+    # 可选:让指定的"老师" (agent) 参与蒸馏 — 用其人设的知识面 & 讲解风格
+    system_prompt = _NOTE_FROM_LECTURE_SYSTEM
+    resolved_agent_key: str | None = None
+    if agent_key:
+        try:
+            from ..agents.registry import resolve_agent
+
+            agent = resolve_agent(agent_key, owner_id=owner_id)
+            resolved_agent_key = agent.key
+            persona = (agent.inline_system_prompt or "").strip()
+            persona_intro = (
+                f"## 你扮演的老师\n"
+                f"你是「{agent.name}」({agent.tagline or agent.role or '专家'})。\n"
+                f"用这位老师的知识面、术语偏好、讲解风格来重新组织下面这份笔记。\n"
+                f"人设详细描述如下(仅用作视角,不要在笔记里复读):\n{persona}\n"
+            )
+            system_prompt = f"{_NOTE_FROM_LECTURE_SYSTEM}\n\n{persona_intro}"
+        except Exception as exc:
+            logger.warning(
+                "generate note from lecture: agent %s resolve failed: %s (fallback 到通用)",
+                agent_key,
+                exc,
+            )
+
     user_input_parts: list[str] = []
     if title_hint:
-        user_input_parts.append(f"# 课堂标题提示\n{title_hint.strip()[:200]}")
-    user_input_parts.append(f"# 课堂音频转写(可能含识别噪音)\n{_truncate_middle(raw, _SESSION_TRANSCRIPT_MAX_CHARS)}")
+        user_input_parts.append(f"# 用户给的标题提示\n{title_hint.strip()[:200]}")
+    if focus_hint:
+        user_input_parts.append(
+            f"# 用户的关注角度 / 学习目标 (务必侧重这个视角)\n{focus_hint.strip()[:800]}"
+        )
+    user_input_parts.append(
+        f"# 音频原始转写 (可能含识别噪音;方括号里是 MM:SS 时间戳)\n"
+        f"{_truncate_middle(raw, _SESSION_TRANSCRIPT_MAX_CHARS)}"
+    )
     user_input = "\n\n".join(user_input_parts)
 
     client = get_client()
@@ -702,7 +732,7 @@ async def generate_note_from_transcript(
             **build_chat_kwargs(
                 model=model,
                 messages=[
-                    {"role": "system", "content": _NOTE_FROM_LECTURE_SYSTEM},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_input},
                 ],
                 temperature=0.3,
@@ -753,7 +783,7 @@ async def generate_note_from_transcript(
 
     payload = {
         "owner_id": owner_id,
-        "agent_key": agent_key,
+        "agent_key": resolved_agent_key,
         "title": title,
         "summary": summary or None,
         "content": content,

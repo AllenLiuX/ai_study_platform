@@ -106,6 +106,8 @@ async def save_lecture_as_note(
         owner_id=user.id,
         transcript=payload.transcript,
         title_hint=payload.title_hint,
+        agent_key=payload.agent_key,
+        focus_hint=payload.focus_hint,
         parent_id=payload.parent_id,
         tags_override=payload.tags,
         keep_raw_transcript=payload.keep_raw_transcript,

@@ -406,6 +406,10 @@ export const lectureApi = {
   saveAsNote: (payload: {
     transcript: string;
     title_hint?: string | null;
+    /** Phase 6.2+: 可选,让某位"老师"参与蒸馏 (用其人设/风格组织笔记) */
+    agent_key?: string | null;
+    /** Phase 6.2+: 可选,用户的关注角度/学习目标 (自由文本,LLM 按此侧重) */
+    focus_hint?: string | null;
     tags?: string[] | null;
     parent_id?: string | null;
     keep_raw_transcript?: boolean;

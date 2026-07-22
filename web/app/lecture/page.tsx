@@ -27,7 +27,9 @@ import { LectureRecorder, type RecorderStatus } from "@/components/LectureRecord
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { lectureApi } from "@/lib/api";
+import { useAgents } from "@/lib/hooks/useAgents";
 import { cn } from "@/lib/utils";
 
 const LS_KEY = "lecture:draft:v2"; // v2: chunks 结构 (v1 是 transcript 字符串)
@@ -47,6 +49,10 @@ interface Draft {
   title: string;
   chunks: TranscriptChunk[];
   savedAt: number;
+  /** Phase 6.2+: 上次选择的老师 key (可选) */
+  agentKey?: string | null;
+  /** Phase 6.2+: 上次的关注角度 (可选) */
+  focusHint?: string;
 }
 
 function formatTimestamp(sec: number): string {
@@ -66,10 +72,14 @@ export default function LecturePage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [chunks, setChunks] = useState<TranscriptChunk[]>([]);
+  const [agentKey, setAgentKey] = useState<string>(""); // "" 表示不指定老师(通用蒸馏)
+  const [focusHint, setFocusHint] = useState("");
   const [recorderStatus, setRecorderStatus] = useState<RecorderStatus>("idle");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [restoredAt, setRestoredAt] = useState<number | null>(null);
+
+  const { data: agents = [], isLoading: agentsLoading } = useAgents();
 
   // recorder 里的 chunkIndex → 我们这里的 chunk id 映射,避免同一个 index 被追加多次
   const chunkIdByRecorderIdx = useRef<Map<number, string>>(new Map());
@@ -83,6 +93,8 @@ export default function LecturePage() {
         if (draft?.chunks?.length) {
           setTitle(draft.title || "");
           setChunks(draft.chunks);
+          if (draft.agentKey) setAgentKey(draft.agentKey);
+          if (draft.focusHint) setFocusHint(draft.focusHint);
           setRestoredAt(draft.savedAt);
           return;
         }
@@ -114,22 +126,35 @@ export default function LecturePage() {
     }
   }, []);
 
-  // chunks 或 title 改变时,写入 localStorage
+  // chunks / title / agentKey / focusHint 改变时,写入 localStorage
   useEffect(() => {
-    if (chunks.length === 0 && !title.trim()) {
+    if (
+      chunks.length === 0 &&
+      !title.trim() &&
+      !agentKey &&
+      !focusHint.trim()
+    ) {
       return;
     }
-    const payload: Draft = { title, chunks, savedAt: Date.now() };
+    const payload: Draft = {
+      title,
+      chunks,
+      savedAt: Date.now(),
+      agentKey: agentKey || null,
+      focusHint,
+    };
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(payload));
     } catch {
       // ignore
     }
-  }, [title, chunks]);
+  }, [title, chunks, agentKey, focusHint]);
 
   const clearDraft = useCallback(() => {
     setTitle("");
     setChunks([]);
+    setAgentKey("");
+    setFocusHint("");
     setRestoredAt(null);
     chunkIdByRecorderIdx.current.clear();
     try {
@@ -214,6 +239,8 @@ export default function LecturePage() {
       const note = await lectureApi.saveAsNote({
         transcript: fullTranscript,
         title_hint: title.trim() || null,
+        agent_key: agentKey || null,
+        focus_hint: focusHint.trim() || null,
         keep_raw_transcript: true,
       });
       try {
@@ -287,10 +314,61 @@ export default function LecturePage() {
               id="lecture-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="例如:高一物理·自由落体运动"
+              placeholder="例如:高一物理·自由落体运动 / XX 主播美妆专场"
               disabled={saving}
               maxLength={200}
             />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="lecture-agent">
+                让哪位老师帮你整理(可选)
+              </Label>
+              <select
+                id="lecture-agent"
+                value={agentKey}
+                onChange={(e) => setAgentKey(e.target.value)}
+                disabled={saving || agentsLoading}
+                className={cn(
+                  "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
+                  "ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                )}
+              >
+                <option value="">通用蒸馏(不指定老师)</option>
+                {agents
+                  .filter((a) => a.is_active !== false)
+                  .map((a) => (
+                    <option key={a.agent_key} value={a.agent_key}>
+                      {a.emoji ? `${a.emoji} ` : ""}
+                      {a.display_name}
+                      {a.owner_type === "user" ? " · 我的" : ""}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                选了老师后,笔记会用其人设的知识面 / 术语 / 讲解风格来组织
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="lecture-focus">
+                关注角度 / 学习目标(可选)
+              </Label>
+              <Textarea
+                id="lecture-focus"
+                value={focusHint}
+                onChange={(e) => setFocusHint(e.target.value)}
+                placeholder="例如:重点提炼带货直播的成交话术和爆款推荐节奏,忽略产品参数"
+                disabled={saving}
+                maxLength={800}
+                rows={3}
+                className="resize-none"
+              />
+              <p className="text-xs text-muted-foreground">
+                自由描述你想学的重点,AI 会按此侧重(而不是套模板)
+              </p>
+            </div>
           </div>
 
           <TranscriptChunkList

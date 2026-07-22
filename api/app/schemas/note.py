@@ -60,7 +60,7 @@ class GenerateNoteFromPracticeRequest(BaseModel):
 
 
 class GenerateNoteFromLectureRequest(BaseModel):
-    """Phase 6.2: 从一段课堂录音转写蒸馏复习笔记。
+    """Phase 6.2: 从一段音频转写蒸馏复习笔记 (通用: 课堂 / 直播 / 播客 / 会议)。
 
     转写文本可能很长,后端会做 head/tail 截断避免超 LLM 上下文;
     并把截断后的原始转写作为附录附在笔记末尾方便对照。
@@ -68,6 +68,11 @@ class GenerateNoteFromLectureRequest(BaseModel):
 
     transcript: str = Field(..., min_length=10, max_length=200_000)
     title_hint: str | None = Field(default=None, max_length=200)
+    # 可选:让某位"老师" (自定义 or 内置) 参与蒸馏,以其人设的知识面/风格组织
+    agent_key: str | None = Field(default=None, max_length=64)
+    # 可选:用户自己的关注角度/学习目标 (自由文本),LLM 会按此侧重
+    # 例如"重点提炼带货直播的成交话术和爆款推荐节奏"
+    focus_hint: str | None = Field(default=None, max_length=800)
     parent_id: str | None = None
     tags: list[str] | None = None
     keep_raw_transcript: bool = True
