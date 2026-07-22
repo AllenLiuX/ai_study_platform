@@ -53,6 +53,37 @@ export function AppHeader({ className }: AppHeaderProps) {
     router.refresh();
   }
 
+  const chatActive = pathname?.startsWith("/chat") ?? false;
+
+  const renderNavLinks = (compact = false) => (
+    <>
+      {NAV_LINKS.map((link) => {
+        const active =
+          link.href === "/dashboard"
+            ? pathname === "/dashboard"
+            : pathname?.startsWith(link.href);
+        const Icon = "icon" in link ? link.icon : undefined;
+        return (
+          <Link
+            key={link.href}
+            href={link.href}
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition",
+              compact && "px-3 py-1",
+              active
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+            )}
+          >
+            {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
+            {link.label}
+          </Link>
+        );
+      })}
+      <ChatNavButton active={chatActive} compact={compact} />
+    </>
+  );
+
   return (
     <header
       className={cn(
@@ -60,14 +91,14 @@ export function AppHeader({ className }: AppHeaderProps) {
         className,
       )}
     >
-      <div className="container flex h-16 items-center justify-between">
-        <div className="flex items-center gap-5">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-foreground text-background">
+      <div className="container flex h-16 items-center justify-between gap-2">
+        <div className="flex items-center gap-5 min-w-0">
+          <Link href="/dashboard" className="flex items-center gap-2 min-w-0">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground text-background">
               <Sparkles className="h-5 w-5" />
             </span>
-            <div className="flex flex-col leading-tight">
-              <span className="text-[15px] font-semibold tracking-tight">
+            <div className="flex flex-col leading-tight min-w-0">
+              <span className="text-[15px] font-semibold tracking-tight truncate">
                 AI 自适应学习平台
               </span>
               <span className="hidden text-[11px] text-muted-foreground sm:inline">
@@ -76,33 +107,11 @@ export function AppHeader({ className }: AppHeaderProps) {
             </div>
           </Link>
           <nav className="hidden items-center gap-1 sm:flex">
-            {NAV_LINKS.map((link) => {
-              const active =
-                link.href === "/dashboard"
-                  ? pathname === "/dashboard"
-                  : pathname?.startsWith(link.href);
-              const Icon = "icon" in link ? link.icon : undefined;
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition",
-                    active
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
-                  )}
-                >
-                  {Icon ? <Icon className="h-3.5 w-3.5" /> : null}
-                  {link.label}
-                </Link>
-              );
-            })}
-            <ChatNavButton active={pathname?.startsWith("/chat") ?? false} />
+            {renderNavLinks()}
           </nav>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {email && (
             <Link
               href="/onboarding?edit=true"
@@ -119,6 +128,20 @@ export function AppHeader({ className }: AppHeaderProps) {
           </Button>
         </div>
       </div>
+
+      {/* 手机端:横向可滑动的导航条 (桌面 sm+ 走上面那行) */}
+      <nav
+        aria-label="主导航"
+        className={cn(
+          "container flex items-center gap-1 overflow-x-auto pb-2 pt-1 sm:hidden",
+          // 隐藏滚动条,但保留滚动功能
+          "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+          // iOS 惯性滑动
+          "[-webkit-overflow-scrolling:touch]",
+        )}
+      >
+        {renderNavLinks(true)}
+      </nav>
     </header>
   );
 }
@@ -127,7 +150,13 @@ export function AppHeader({ className }: AppHeaderProps) {
  * "对话" tab:点击后跳到最近一条 session;若没有任何 session,
  * 默认创建一个 head_teacher 会话再跳进去 (相当于"开始第一次对话")。
  */
-function ChatNavButton({ active }: { active: boolean }) {
+function ChatNavButton({
+  active,
+  compact = false,
+}: {
+  active: boolean;
+  compact?: boolean;
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
@@ -164,7 +193,8 @@ function ChatNavButton({ active }: { active: boolean }) {
       onClick={go}
       disabled={loading}
       className={cn(
-        "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition",
+        "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition",
+        compact && "px-3 py-1",
         active
           ? "bg-primary/10 text-primary"
           : "text-muted-foreground hover:bg-secondary hover:text-foreground",
