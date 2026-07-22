@@ -30,6 +30,8 @@ class Material(BaseModel):
     parse_error: str | None = None
     summary: str | None = None
     chunk_count: int
+    # Phase 7: 群共享标记
+    group_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

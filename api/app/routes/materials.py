@@ -14,6 +14,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
     status,
 )
@@ -49,6 +50,8 @@ async def upload_material(
     subject_id: str | None = Form(default=None),
     grade: str | None = Form(default=None),
     material_type: MaterialType = Form(default="note"),
+    # Phase 7: 上传到某个群 (可选;为 null 时是个人资料库)
+    group_id: str | None = Form(default=None),
     user: CurrentUser = Depends(get_current_user),
 ) -> Material:
     """学生上传一份资料 (multipart)。
@@ -61,6 +64,11 @@ async def upload_material(
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名缺失")
+
+    # Phase 7: 若指定 group_id, 必须是该群成员才能上传
+    if group_id:
+        if not repos.get_group_member(group_id, user.id):
+            raise HTTPException(status_code=403, detail="你不是该群成员, 无法上传到此群")
 
     mime = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
     detected = parser.detect_kind(mime, file.filename)
@@ -116,6 +124,7 @@ async def upload_material(
             "id": material_id,
             "owner_type": "student",
             "owner_id": user.id,
+            "group_id": group_id,  # Phase 7: null=个人; 有值=群共享
             "title": (title or file.filename).strip() or file.filename,
             "subject_id": subject_id,
             "grade": grade,
@@ -143,9 +152,27 @@ async def _run_processing(material_id: str) -> None:
 
 @router.get("", response_model=list[Material])
 async def list_my_materials(
+    scope: str = Query(default="personal", pattern="^(personal|group|all)$"),
+    group_id: str | None = Query(default=None),
     user: CurrentUser = Depends(get_current_user),
 ) -> list[Material]:
-    rows = repos.list_materials(user.id)
+    """列出资料。Phase 7 起 scope 语义:
+
+    - `personal` (默认): 个人资料 + 平台公共
+    - `group` + `group_id=xxx`: 某个群下的所有资料 (调用者必须是该群成员)
+    - `all`: 个人 + 平台 + 我加入的所有群
+    """
+    if scope == "group":
+        if not group_id:
+            raise HTTPException(status_code=400, detail="scope=group 时必须传 group_id")
+        if not repos.get_group_member(group_id, user.id):
+            raise HTTPException(status_code=403, detail="你不是该群成员")
+        rows = repos.list_materials(user.id, scope="group", group_id=group_id)
+    elif scope == "all":
+        gids = repos.list_my_group_ids(user.id)
+        rows = repos.list_materials(user.id, scope="all", group_ids=gids)
+    else:
+        rows = repos.list_materials(user.id, scope="personal")
     return [Material.model_validate(r) for r in rows]
 
 
@@ -154,7 +181,12 @@ async def get_material(
     material_id: str,
     user: CurrentUser = Depends(get_current_user),
 ) -> Material:
+    # 先尝试 owner/平台读取; 拿不到再看是不是群成员
     row = repos.get_material(material_id, user.id)
+    if not row:
+        raw = repos.get_material_by_id(material_id)
+        if raw and raw.get("group_id") and repos.get_group_member(raw["group_id"], user.id):
+            row = raw
     if not row:
         raise HTTPException(status_code=404, detail="资料不存在或无权访问")
     return Material.model_validate(row)
@@ -165,17 +197,30 @@ async def delete_material(
     material_id: str,
     user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    row = repos.get_material(material_id, user.id)
-    if not row or row.get("owner_id") != user.id:
-        raise HTTPException(status_code=404, detail="资料不存在或无权删除")
+    # 权限模型 (Phase 7):
+    #   - 个人资料 (group_id=null): 仅本人可删
+    #   - 群资料 (group_id!=null): 本人 (创建者) 可删; 或群 owner/admin 可删
+    raw = repos.get_material_by_id(material_id)
+    if not raw:
+        raise HTTPException(status_code=404, detail="资料不存在")
 
-    deleted = repos.delete_material(material_id, user.id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="资料不存在或无权删除")
+    gid = raw.get("group_id")
+    can_delete = raw.get("owner_id") == user.id
+    if not can_delete and gid:
+        m = repos.get_group_member(gid, user.id)
+        if m and m.get("role") in ("owner", "admin"):
+            can_delete = True
+    if not can_delete:
+        raise HTTPException(status_code=403, detail="无权删除该资料")
 
-    storage_path = row.get("storage_path")
+    # 直接按 id 删 (绕过 delete_material 里的 owner_id 校验)
+    client = get_admin_client()
+    del_resp = client.table("learning_materials").delete().eq("id", material_id).execute()
+    if not del_resp.data:
+        raise HTTPException(status_code=404, detail="资料不存在")
+
+    storage_path = raw.get("storage_path")
     if storage_path:
-        client = get_admin_client()
         try:
             await asyncio.to_thread(
                 lambda: client.storage.from_(STORAGE_BUCKET).remove([storage_path])

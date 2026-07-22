@@ -27,6 +27,8 @@ class KnowledgeNote(BaseModel):
     last_reviewed_at: datetime | None = None
     source: NoteSource = "chat"
     chunk_status: ChunkStatus = "pending"
+    # Phase 7: 群共享标记. null=个人笔记; 有值=归属该群
+    group_id: str | None = None
     chunk_count: int = 0
     chunk_error: str | None = None
     created_at: datetime | None = None
@@ -88,6 +90,8 @@ class CreateNoteRequest(BaseModel):
     origin_session_id: str | None = None
     origin_message_id: str | None = None
     source: NoteSource = "manual"
+    # Phase 7: 可选,新建到某个群 (调用方必须是该群成员,后端会校验)
+    group_id: str | None = None
 
 
 class UpdateNoteRequest(BaseModel):

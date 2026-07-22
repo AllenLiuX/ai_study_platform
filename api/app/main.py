@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .core.config import get_settings
 from .routes import agents as agents_route
 from .routes import chat as chat_route
+from .routes import groups as groups_route
 from .routes import health as health_route
 from .routes import lecture as lecture_route
 from .routes import materials as materials_route
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
     app.include_router(notes_route.router, prefix="/api")
     app.include_router(practice_route.router, prefix="/api")
     app.include_router(lecture_route.router, prefix="/api")
+    app.include_router(groups_route.router, prefix="/api")
 
     return app
 

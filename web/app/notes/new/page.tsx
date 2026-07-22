@@ -1,9 +1,13 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Save } from "lucide-react";
+// Phase 7: useSearchParams 需要 client 侧渲染, 禁用预生成
+export const dynamic = "force-dynamic";
+
+import { Suspense } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Loader2, Save, Users } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
@@ -11,17 +15,35 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { notesApi } from "@/lib/api";
+import { groupsApi, notesApi } from "@/lib/api";
 import type { KnowledgeNote } from "@/lib/types";
 
 export default function NewNotePage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">加载中…</div>}>
+      <NewNotePageInner />
+    </Suspense>
+  );
+}
+
+function NewNotePageInner() {
   const router = useRouter();
+  const search = useSearchParams();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [content, setContent] = useState("");
   const [tags, setTags] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Phase 7: 支持 ?group_id=xxx 预设群, 也在表单里给个下拉可改
+  const initialGroupId = search?.get("group_id") ?? "";
+  const [groupId, setGroupId] = useState<string>(initialGroupId);
+  const myGroupsQuery = useQuery({
+    queryKey: ["my-groups"],
+    queryFn: groupsApi.mine,
+    staleTime: 60_000,
+  });
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -34,6 +56,7 @@ export default function NewNotePage() {
           .map((s) => s.trim())
           .filter(Boolean),
         source: "manual",
+        group_id: groupId || null,
       }),
     onSuccess: (note: KnowledgeNote) => {
       queryClient.invalidateQueries({ queryKey: ["notes"] });
@@ -106,6 +129,26 @@ export default function NewNotePage() {
               onChange={(e) => setTags(e.target.value)}
               placeholder="系统设计, 缓存, 面试"
             />
+          </div>
+          {/* Phase 7: 归属选择 (个人 / 共享到某个群) */}
+          <div className="space-y-2">
+            <Label htmlFor="group">
+              <Users className="mr-1 inline h-3.5 w-3.5 text-muted-foreground" />
+              保存到 (可选)
+            </Label>
+            <select
+              id="group"
+              value={groupId}
+              onChange={(e) => setGroupId(e.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">个人笔记 (仅自己可见)</option>
+              {(myGroupsQuery.data ?? []).map((g) => (
+                <option key={g.id} value={g.id}>
+                  共享到「{g.name}」 · {g.member_count} 人可见
+                </option>
+              ))}
+            </select>
           </div>
           {error && (
             <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">

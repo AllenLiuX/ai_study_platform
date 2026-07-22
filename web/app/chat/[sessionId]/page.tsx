@@ -58,7 +58,7 @@ export default function ChatSessionPage() {
 
   const materialsQuery = useQuery({
     queryKey: ["materials"],
-    queryFn: materialsApi.list,
+    queryFn: () => materialsApi.list(),
   });
 
   // 用于 StudentProfilePanel 的"学习进度"卡片:

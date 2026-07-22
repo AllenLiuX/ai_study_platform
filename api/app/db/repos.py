@@ -211,17 +211,45 @@ def get_material_by_id(material_id: str) -> dict | None:
     return resp.data if resp else None
 
 
-def list_materials(owner_id: str, limit: int = 100) -> list[dict]:
-    """学生维度的资料列表 (含平台公共资料)。"""
+def list_materials(
+    owner_id: str,
+    *,
+    scope: str = "personal",  # 'personal' | 'group' | 'all'
+    group_id: str | None = None,
+    group_ids: list[str] | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """学生维度的资料列表。
+
+    scope 语义 (Phase 7):
+      - 'personal': owner_id 匹配 且 group_id IS NULL, 加上平台公共
+      - 'group': 指定 group_id (需在 group_ids 里, 后端已鉴权) 的所有资料
+      - 'all': 个人 (含平台) + 我加入的所有群 (group_ids) 的资料
+    """
     client = get_admin_client()
-    resp = (
-        client.table("learning_materials")
-        .select("*")
-        .or_(f"owner_id.eq.{owner_id},owner_type.eq.platform")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
+    q = client.table("learning_materials").select("*")
+
+    if scope == "group":
+        if not group_id:
+            return []
+        q = q.eq("group_id", group_id)
+    elif scope == "all":
+        # 个人 (owner + null group) / 平台 / 我加入的群
+        gids = group_ids or []
+        # supabase-py 的 .or_ 支持逗号分隔多条件
+        conds = [f"owner_id.eq.{owner_id}", "owner_type.eq.platform"]
+        if gids:
+            # in.(a,b) 语法
+            conds.append(f"group_id.in.({','.join(gids)})")
+        q = q.or_(",".join(conds))
+    else:  # personal (默认)
+        # owner_id 是自己 且 group_id IS NULL, 或 平台公共
+        # supabase-py .or_ 里 is.null 用 is.null 写法
+        q = q.or_(
+            f"and(owner_id.eq.{owner_id},group_id.is.null),owner_type.eq.platform"
+        )
+
+    resp = q.order("created_at", desc=True).limit(limit).execute()
     return resp.data or []
 
 
@@ -379,32 +407,57 @@ def list_notes(
     *,
     agent_key: str | None = None,
     tag: str | None = None,
+    scope: str = "personal",  # 'personal' | 'group' | 'all'
+    group_id: str | None = None,
+    group_ids: list[str] | None = None,
     limit: int = 200,
 ) -> list[dict]:
+    """笔记列表。Phase 7 起 scope 语义同 list_materials。"""
     client = get_admin_client()
-    q = (
-        client.table("knowledge_notes")
-        .select("*")
-        .eq("owner_id", owner_id)
-        .order("updated_at", desc=True)
-        .limit(limit)
-    )
+    q = client.table("knowledge_notes").select("*")
+
+    if scope == "group":
+        if not group_id:
+            return []
+        q = q.eq("group_id", group_id)
+    elif scope == "all":
+        gids = group_ids or []
+        conds = [f"owner_id.eq.{owner_id}"]
+        if gids:
+            conds.append(f"group_id.in.({','.join(gids)})")
+        q = q.or_(",".join(conds))
+    else:  # personal
+        q = q.eq("owner_id", owner_id).is_("group_id", "null")
+
     if agent_key:
         q = q.eq("agent_key", agent_key)
     if tag:
-        # jsonb @> 用 contains
         q = q.contains("tags", [tag])
-    resp = q.execute()
+    resp = q.order("updated_at", desc=True).limit(limit).execute()
     return resp.data or []
 
 
 def get_note(note_id: str, owner_id: str) -> dict | None:
+    """读单条笔记 — 只匹配 owner (不含群共享;群内读走 get_note_admin)。"""
     client = get_admin_client()
     resp = (
         client.table("knowledge_notes")
         .select("*")
         .eq("id", note_id)
         .eq("owner_id", owner_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def get_note_by_id(note_id: str) -> dict | None:
+    """后端内部用 (不做归属过滤;权限交调用方)。"""
+    client = get_admin_client()
+    resp = (
+        client.table("knowledge_notes")
+        .select("*")
+        .eq("id", note_id)
         .maybe_single()
         .execute()
     )
@@ -575,3 +628,238 @@ def list_practice_attempts(question_ids: list[str]) -> list[dict]:
         .execute()
     )
     return resp.data or []
+
+
+# =============================================================================
+# Phase 7: 群组 / 班级 (共享资料库 + 笔记)
+# =============================================================================
+import secrets
+import string
+
+
+_INVITE_ALPHABET = string.ascii_uppercase + string.digits  # 大写+数字, 好念不易混
+# 排除易混字符
+_INVITE_ALPHABET = _INVITE_ALPHABET.translate(str.maketrans("", "", "O0I1"))
+
+
+def generate_invite_code(length: int = 8, *, max_attempts: int = 8) -> str:
+    """生成一个全局唯一的邀请码 (最多重试 max_attempts 次防碰撞)。"""
+    client = get_admin_client()
+    for _ in range(max_attempts):
+        code = "".join(secrets.choice(_INVITE_ALPHABET) for _ in range(length))
+        resp = (
+            client.table("groups")
+            .select("id", count="exact")
+            .eq("invite_code", code)
+            .limit(1)
+            .execute()
+        )
+        if not resp.data:
+            return code
+    # 极小概率碰撞, 加长再试一次
+    return "".join(secrets.choice(_INVITE_ALPHABET) for _ in range(length + 2))
+
+
+def create_group(*, owner_id: str, payload: dict) -> dict:
+    """建群 + 把 owner 写进 group_members(role='owner') 一步到位。"""
+    client = get_admin_client()
+    row = {
+        **payload,
+        "owner_id": owner_id,
+        "invite_code": payload.get("invite_code") or generate_invite_code(),
+        "member_count": 1,
+    }
+    resp = client.table("groups").insert(row).execute()
+    group = (resp.data or [row])[0]
+    # 加 owner 到 members (trigger 会自动把 member_count 从 1 变 2? 不会 — 我们初始化是 1
+    # 且 trigger 走 +1, 所以先把 member_count 落成 0 再让 trigger 加到 1)
+    # 修正: 上面 create 里已经写 member_count=1 相当于把 owner 计进去,
+    #       insert group_members 时 trigger 会再 +1 → 2, 错. 先把 groups 落成 0.
+    client.table("groups").update({"member_count": 0}).eq("id", group["id"]).execute()
+    client.table("group_members").insert(
+        {"group_id": group["id"], "user_id": owner_id, "role": "owner"}
+    ).execute()
+    # 再读一次拿最新 member_count
+    group = get_group_by_id(group["id"]) or group
+    return group
+
+
+def get_group_by_id(group_id: str) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("groups")
+        .select("*")
+        .eq("id", group_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def get_group_by_invite_code(code: str) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("groups")
+        .select("*")
+        .eq("invite_code", code)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def list_my_groups(user_id: str, limit: int = 50) -> list[dict]:
+    """我加入的所有群 (含 owner)。"""
+    client = get_admin_client()
+    # 先取 group_ids
+    m = (
+        client.table("group_members")
+        .select("group_id, role, joined_at")
+        .eq("user_id", user_id)
+        .order("joined_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    rows = m.data or []
+    if not rows:
+        return []
+    role_by_gid = {r["group_id"]: r["role"] for r in rows}
+    gids = list(role_by_gid.keys())
+    g = (
+        client.table("groups")
+        .select("*")
+        .in_("id", gids)
+        .execute()
+    )
+    groups = g.data or []
+    # 附上 my_role
+    for grp in groups:
+        grp["my_role"] = role_by_gid.get(grp["id"], "member")
+    # 按 joined_at 降序 (member 表里的顺序)
+    order = {gid: i for i, gid in enumerate(gids)}
+    groups.sort(key=lambda x: order.get(x["id"], 999))
+    return groups
+
+
+def list_my_group_ids(user_id: str) -> list[str]:
+    """快速拿 group_ids 列表, 用于 materials/notes scope='all' 查询。"""
+    client = get_admin_client()
+    resp = (
+        client.table("group_members")
+        .select("group_id")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return [r["group_id"] for r in (resp.data or [])]
+
+
+def search_public_groups(*, q: str | None = None, limit: int = 30) -> list[dict]:
+    """搜公开群 (is_public=true), q 走 ilike 模糊匹配 name/description。"""
+    client = get_admin_client()
+    query = (
+        client.table("groups")
+        .select("*")
+        .eq("is_public", True)
+        .order("member_count", desc=True)
+        .limit(limit)
+    )
+    if q:
+        q_norm = q.strip().replace(",", " ")[:60]
+        if q_norm:
+            # ilike 用 % 作通配, or_ 组合 name/description
+            like = f"%{q_norm}%"
+            query = query.or_(f"name.ilike.{like},description.ilike.{like}")
+    resp = query.execute()
+    return resp.data or []
+
+
+def get_group_member(group_id: str, user_id: str) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("group_members")
+        .select("*")
+        .eq("group_id", group_id)
+        .eq("user_id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def list_group_members(group_id: str, limit: int = 100) -> list[dict]:
+    client = get_admin_client()
+    resp = (
+        client.table("group_members")
+        .select("*")
+        .eq("group_id", group_id)
+        .order("role", desc=False)  # owner/admin/member 字典序不完全对, 前端可再排
+        .order("joined_at", desc=False)
+        .limit(limit)
+        .execute()
+    )
+    return resp.data or []
+
+
+def add_group_member(*, group_id: str, user_id: str, role: str = "member") -> dict:
+    """加入群 (幂等: 已在则返回现有记录)。"""
+    existing = get_group_member(group_id, user_id)
+    if existing:
+        return existing
+    client = get_admin_client()
+    row = {"group_id": group_id, "user_id": user_id, "role": role}
+    resp = client.table("group_members").insert(row).execute()
+    return (resp.data or [row])[0]
+
+
+def remove_group_member(group_id: str, user_id: str) -> bool:
+    client = get_admin_client()
+    resp = (
+        client.table("group_members")
+        .delete()
+        .eq("group_id", group_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return bool(resp.data)
+
+
+def count_group_materials(group_id: str) -> int:
+    client = get_admin_client()
+    resp = (
+        client.table("learning_materials")
+        .select("id", count="exact")
+        .eq("group_id", group_id)
+        .limit(1)
+        .execute()
+    )
+    return resp.count or 0
+
+
+def count_group_notes(group_id: str) -> int:
+    client = get_admin_client()
+    resp = (
+        client.table("knowledge_notes")
+        .select("id", count="exact")
+        .eq("group_id", group_id)
+        .limit(1)
+        .execute()
+    )
+    return resp.count or 0
+
+
+def update_group(group_id: str, fields: dict) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("groups")
+        .update(fields)
+        .eq("id", group_id)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def delete_group(group_id: str) -> bool:
+    client = get_admin_client()
+    resp = client.table("groups").delete().eq("id", group_id).execute()
+    return bool(resp.data)

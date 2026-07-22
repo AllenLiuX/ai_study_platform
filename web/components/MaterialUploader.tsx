@@ -43,12 +43,18 @@ interface MaterialUploaderProps {
   onUploaded: (m: Material) => void;
   /** 当前 embedding 模型,展示到帮助文案里 */
   embeddingModel?: string;
+  /** Phase 7: 若指定, 上传时把资料归到这个群 (群共享) */
+  groupId?: string;
+  /** 群名用于 UI 提示 */
+  groupName?: string;
 }
 
 export function MaterialUploader({
   subjects,
   onUploaded,
   embeddingModel,
+  groupId,
+  groupName,
 }: MaterialUploaderProps) {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
@@ -88,6 +94,7 @@ export function MaterialUploader({
         title: title || file.name,
         subject_id: subjectId || null,
         material_type: type,
+        group_id: groupId || null,
       });
       onUploaded(m);
       setFile(null);
@@ -105,7 +112,9 @@ export function MaterialUploader({
     <div className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-card">
       <div>
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-base font-semibold">上传一份资料</h3>
+          <h3 className="text-base font-semibold">
+            {groupId ? `上传到群「${groupName ?? "…"}」` : "上传一份资料"}
+          </h3>
           {embeddingModel && (
             <span className="inline-flex items-center gap-1 rounded-full border border-primary/15 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary">
               <Sparkles className="h-3 w-3" />
@@ -114,10 +123,19 @@ export function MaterialUploader({
           )}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          支持 PDF / Word (.docx) / TXT / Markdown / 图片 (PNG/JPG/WEBP),最大 {MAX_MB}MB。
-          扫描版 PDF 和图片会自动用视觉模型抽成 markdown(含公式),再切片向量化,
-          之后在对话里可以勾选这份资料让 AI 基于它回答。
-          老 .doc 请先在 Word/WPS 里「另存为 .docx」。
+          {groupId ? (
+            <>
+              上传后<span className="font-medium text-foreground">群里所有成员</span>都能看到、下载和引用。
+              支持 PDF / Word / TXT / Markdown / 图片, 最大 {MAX_MB}MB。
+            </>
+          ) : (
+            <>
+              支持 PDF / Word (.docx) / TXT / Markdown / 图片 (PNG/JPG/WEBP), 最大 {MAX_MB}MB。
+              扫描版 PDF 和图片会自动用视觉模型抽成 markdown(含公式), 再切片向量化,
+              之后在对话里可以勾选这份资料让 AI 基于它回答。
+              老 .doc 请先在 Word/WPS 里「另存为 .docx」。
+            </>
+          )}
         </p>
       </div>
 

@@ -11,6 +11,7 @@ import {
   Sparkles,
   Target,
   UserCog,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -32,6 +33,7 @@ const NAV_LINKS = [
   { href: "/lecture", label: "听课", icon: Headphones },
   { href: "/materials", label: "资料库", icon: Library },
   { href: "/notes", label: "笔记", icon: Notebook },
+  { href: "/groups", label: "群组", icon: Users },
 ] as const;
 
 export function AppHeader({ className }: AppHeaderProps) {

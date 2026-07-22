@@ -218,8 +218,59 @@ export interface Material {
   parse_error: string | null;
   summary: string | null;
   chunk_count: number;
+  /** Phase 7: 归属群 (null=个人资料) */
+  group_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// -----------------------------------------------------------------------------
+// Phase 7: 群组 / 班级
+// -----------------------------------------------------------------------------
+export type GroupRole = "owner" | "admin" | "member";
+
+export interface Group {
+  id: string;
+  name: string;
+  description: string | null;
+  invite_code: string;
+  is_public: boolean;
+  owner_id: string;
+  member_count: number;
+  emoji: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  /** list_my_groups 会附上; search 不带 */
+  my_role?: GroupRole;
+}
+
+export interface GroupMember {
+  user_id: string;
+  role: GroupRole;
+  joined_at?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+}
+
+export interface GroupDetail extends Group {
+  my_role: GroupRole;
+  members_preview: GroupMember[];
+  materials_count: number;
+  notes_count: number;
+}
+
+export interface CreateGroupRequest {
+  name: string;
+  description?: string | null;
+  is_public?: boolean;
+  emoji?: string | null;
+}
+
+export interface UpdateGroupRequest {
+  name?: string;
+  description?: string | null;
+  is_public?: boolean;
+  emoji?: string | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -299,6 +350,8 @@ export interface KnowledgeNote {
   chunk_status: NoteChunkStatus;
   chunk_count: number;
   chunk_error: string | null;
+  /** Phase 7: 归属群 (null=个人笔记) */
+  group_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -313,6 +366,8 @@ export interface CreateNoteRequest {
   origin_session_id?: string | null;
   origin_message_id?: string | null;
   source?: NoteSource;
+  /** Phase 7: 可选,新建到某个群 */
+  group_id?: string | null;
 }
 
 export interface UpdateNoteRequest {

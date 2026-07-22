@@ -14,6 +14,11 @@ import type {
   FinishSessionResponse,
   FollowUp,
   GeneratedAgentSpec,
+  Group,
+  GroupDetail,
+  GroupMember,
+  CreateGroupRequest,
+  UpdateGroupRequest,
   HintResponse,
   KnowledgeNote,
   Material,
@@ -238,8 +243,16 @@ export const chatApi = {
 // -----------------------------------------------------------------------------
 // Materials (Phase 1)
 // -----------------------------------------------------------------------------
+export type MaterialsScope = "personal" | "group" | "all";
+
 export const materialsApi = {
-  list: () => request<Material[]>("/api/materials"),
+  list: (opts: { scope?: MaterialsScope; group_id?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.scope && opts.scope !== "personal") params.set("scope", opts.scope);
+    if (opts.group_id) params.set("group_id", opts.group_id);
+    const qs = params.toString();
+    return request<Material[]>(`/api/materials${qs ? `?${qs}` : ""}`);
+  },
   get: (id: string) => request<Material>(`/api/materials/${id}`),
   delete: (id: string) =>
     request<void>(`/api/materials/${id}`, { method: "DELETE" }),
@@ -248,6 +261,8 @@ export const materialsApi = {
     subject_id?: string | null;
     grade?: string | null;
     material_type?: MaterialType;
+    /** Phase 7: 上传到某个群 (可选;不传就是个人库) */
+    group_id?: string | null;
   } = {}): Promise<Material> => {
     const token = await getAccessToken();
     const form = new FormData();
@@ -256,6 +271,7 @@ export const materialsApi = {
     if (fields.subject_id) form.set("subject_id", fields.subject_id);
     if (fields.grade) form.set("grade", fields.grade);
     if (fields.material_type) form.set("material_type", fields.material_type);
+    if (fields.group_id) form.set("group_id", fields.group_id);
 
     const resp = await fetch(`${API_BASE}/api/materials`, {
       method: "POST",
@@ -306,11 +322,20 @@ export const agentsApi = {
 // -----------------------------------------------------------------------------
 // Notes (Phase 5: 笔记 = 私有知识点)
 // -----------------------------------------------------------------------------
+export type NotesScope = "personal" | "group" | "all";
+
 export const notesApi = {
-  list: (opts: { agent_key?: string; tag?: string } = {}) => {
+  list: (opts: {
+    agent_key?: string;
+    tag?: string;
+    scope?: NotesScope;
+    group_id?: string;
+  } = {}) => {
     const params = new URLSearchParams();
     if (opts.agent_key) params.set("agent_key", opts.agent_key);
     if (opts.tag) params.set("tag", opts.tag);
+    if (opts.scope && opts.scope !== "personal") params.set("scope", opts.scope);
+    if (opts.group_id) params.set("group_id", opts.group_id);
     const qs = params.toString();
     return request<KnowledgeNote[]>(`/api/notes${qs ? `?${qs}` : ""}`);
   },
@@ -586,3 +611,53 @@ function parseSseEvent(raw: string): { event: string; data: string } | null {
   }
   return { event, data: dataLines.join("\n") };
 }
+
+// -----------------------------------------------------------------------------
+// Groups (Phase 7: 群组 / 班级)
+// -----------------------------------------------------------------------------
+export const groupsApi = {
+  /** 我加入的所有群 */
+  mine: () => request<Group[]>("/api/groups/mine"),
+  /** 搜索公开群 (仅 is_public=true) */
+  search: (q?: string) =>
+    request<Group[]>(
+      `/api/groups/search${q ? `?q=${encodeURIComponent(q)}` : ""}`,
+    ),
+  /** 群详情 (必须是成员;含 my_role + 成员预览 + 内容计数) */
+  get: (groupId: string) => request<GroupDetail>(`/api/groups/${groupId}`),
+  /** 完整成员列表 */
+  members: (groupId: string) =>
+    request<GroupMember[]>(`/api/groups/${groupId}/members`),
+  /** 建群 */
+  create: (payload: CreateGroupRequest) =>
+    request<Group>("/api/groups", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  /** 群主改群信息 */
+  update: (groupId: string, payload: UpdateGroupRequest) =>
+    request<Group>(`/api/groups/${groupId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  /** 群主解散群 */
+  remove: (groupId: string) =>
+    request<void>(`/api/groups/${groupId}`, { method: "DELETE" }),
+  /** 靠邀请码加群 (私密群唯一途径;公开群也可) */
+  joinByCode: (code: string) =>
+    request<Group>("/api/groups/join", {
+      method: "POST",
+      body: JSON.stringify({ invite_code: code }),
+    }),
+  /** 直接加入某个公开群 */
+  joinPublic: (groupId: string) =>
+    request<Group>(`/api/groups/${groupId}/join`, { method: "POST" }),
+  /** 退群 (群主除外) */
+  leave: (groupId: string) =>
+    request<void>(`/api/groups/${groupId}/leave`, { method: "POST" }),
+  /** 踢人 (仅 owner/admin) */
+  kick: (groupId: string, userId: string) =>
+    request<void>(`/api/groups/${groupId}/members/${userId}`, {
+      method: "DELETE",
+    }),
+};

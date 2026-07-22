@@ -1,5 +1,9 @@
 "use client";
 
+// Phase 7: useSearchParams 需要 client 侧渲染, 禁用预生成
+export const dynamic = "force-dynamic";
+
+import { Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -8,20 +12,25 @@ import {
   Loader2,
   Search,
   Sparkles,
+  Users,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
 import { MaterialCard } from "@/components/MaterialCard";
 import { MaterialUploader } from "@/components/MaterialUploader";
 import { ModelBadge } from "@/components/ModelBadge";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { materialsApi, metaApi, studentApi } from "@/lib/api";
-import type { Material, Subject } from "@/lib/types";
+import { groupsApi, materialsApi, metaApi, studentApi } from "@/lib/api";
+import type { Group, Material, Subject } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Tab = "mine" | "platform";
+type Scope = "personal" | "group" | "all";
 
 const SUBJECT_LABELS: Record<string, string> = {
   math: "数学",
@@ -30,18 +39,59 @@ const SUBJECT_LABELS: Record<string, string> = {
 };
 
 export default function MaterialsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">加载中…</div>}>
+      <MaterialsPageInner />
+    </Suspense>
+  );
+}
+
+function MaterialsPageInner() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const search = useSearchParams();
+
+  // Phase 7: scope 从 URL 读取, 默认 personal
+  const urlScope = (search?.get("scope") ?? "personal") as Scope;
+  const urlGroupId = search?.get("group_id") ?? null;
+  const scope: Scope =
+    urlScope === "group" && urlGroupId ? "group" : urlScope === "all" ? "all" : "personal";
+
   const [tab, setTab] = useState<Tab>("mine");
   const [subjectFilter, setSubjectFilter] = useState<string | null>(null);
+
+  // scope 切换时,回到"我的"tab (平台资料只在 personal 有意义)
+  useEffect(() => {
+    if (scope !== "personal") setTab("mine");
+  }, [scope]);
 
   const subjectsQuery = useQuery({
     queryKey: ["subjects"],
     queryFn: studentApi.getSubjects,
   });
 
+  const myGroupsQuery = useQuery({
+    queryKey: ["my-groups"],
+    queryFn: groupsApi.mine,
+    staleTime: 60_000,
+  });
+
+  const currentGroup = useMemo(
+    () =>
+      scope === "group" && urlGroupId
+        ? (myGroupsQuery.data ?? []).find((g) => g.id === urlGroupId)
+        : null,
+    [scope, urlGroupId, myGroupsQuery.data],
+  );
+
   const materialsQuery = useQuery({
-    queryKey: ["materials"],
-    queryFn: materialsApi.list,
+    queryKey: ["materials", scope, scope === "group" ? urlGroupId : null],
+    queryFn: () =>
+      scope === "group"
+        ? materialsApi.list({ scope: "group", group_id: urlGroupId! })
+        : scope === "all"
+          ? materialsApi.list({ scope: "all" })
+          : materialsApi.list(),
     refetchInterval: (q) => {
       const list = (q.state.data as Material[] | undefined) ?? [];
       const stillCooking = list.some(
@@ -52,6 +102,18 @@ export default function MaterialsPage() {
       return stillCooking ? 2000 : false;
     },
   });
+
+  const setScope = (next: Scope, groupId?: string) => {
+    const params = new URLSearchParams();
+    if (next === "group" && groupId) {
+      params.set("scope", "group");
+      params.set("group_id", groupId);
+    } else if (next === "all") {
+      params.set("scope", "all");
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/materials?${qs}` : "/materials");
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => materialsApi.delete(id),
@@ -68,13 +130,20 @@ export default function MaterialsPage() {
   const embeddingModel = configQuery.data?.models.embedding;
 
   const all = materialsQuery.data ?? [];
+  // scope=group / scope=all 时后端已过滤好, 前端不再区分 mine/platform tab
   const mine = useMemo(
-    () => all.filter((m) => m.owner_type === "student"),
-    [all],
+    () =>
+      scope === "personal"
+        ? all.filter((m) => m.owner_type === "student")
+        : all,
+    [all, scope],
   );
   const platform = useMemo(
-    () => all.filter((m) => m.owner_type === "platform"),
-    [all],
+    () =>
+      scope === "personal"
+        ? all.filter((m) => m.owner_type === "platform")
+        : [],
+    [all, scope],
   );
 
   const mineReady = mine.filter((m) => m.parse_status === "ready").length;
@@ -112,32 +181,61 @@ export default function MaterialsPage() {
               <ModelBadge model={embeddingModel} label="切片 / 向量化" />
             )}
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">学习资料库</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {scope === "group" && currentGroup
+              ? `${currentGroup.emoji || "👥"} ${currentGroup.name} · 共享资料`
+              : "学习资料库"}
+          </h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            平台已经预置了一批 <span className="font-medium text-foreground">基于课程标准生成的 AI 讲义</span>,
-            所有学生都可以引用;你也可以上传自己的课本章节、错题本、考试卷,
-            这些 <span className="font-medium text-foreground">只有你自己看得到</span>。在和老师对话时勾选若干份,AI 就会基于这些资料回答。
+            {scope === "group" && currentGroup ? (
+              <>
+                这是「{currentGroup.name}」的共享资料库,
+                <span className="font-medium text-foreground">群里所有成员</span>都可以看到、下载和引用。
+                <Link
+                  href={`/groups/${currentGroup.id}`}
+                  className="ml-1 text-primary hover:underline"
+                >
+                  返回群主页 →
+                </Link>
+              </>
+            ) : (
+              <>
+                平台已经预置了一批 <span className="font-medium text-foreground">基于课程标准生成的 AI 讲义</span>,
+                所有学生都可以引用;你也可以上传自己的课本章节、错题本、考试卷,
+                这些 <span className="font-medium text-foreground">只有你自己看得到</span>。在和老师对话时勾选若干份,AI 就会基于这些资料回答。
+              </>
+            )}
           </p>
         </div>
 
-        {/* Tab 切换 */}
-        <div className="mb-5 inline-flex items-center gap-1 rounded-full border border-border bg-card p-1 shadow-sm">
-          <TabButton
-            active={tab === "mine"}
-            onClick={() => setTab("mine")}
-            label="我的资料"
-            count={mine.length}
-          />
-          <TabButton
-            active={tab === "platform"}
-            onClick={() => setTab("platform")}
-            label="公共资料"
-            count={platform.length}
-            badge="AI 讲义"
-          />
-        </div>
+        {/* Phase 7: scope 切换 (我的 / 群组 / 全部) */}
+        <ScopeSwitcher
+          scope={scope}
+          currentGroupId={urlGroupId}
+          myGroups={myGroupsQuery.data ?? []}
+          onChange={setScope}
+        />
 
-        {tab === "mine" ? (
+        {/* Tab 切换 — 只在 personal scope 下显示 (群组/全部 没有平台 tab) */}
+        {scope === "personal" && (
+          <div className="mb-5 inline-flex items-center gap-1 rounded-full border border-border bg-card p-1 shadow-sm">
+            <TabButton
+              active={tab === "mine"}
+              onClick={() => setTab("mine")}
+              label="我的资料"
+              count={mine.length}
+            />
+            <TabButton
+              active={tab === "platform"}
+              onClick={() => setTab("platform")}
+              label="公共资料"
+              count={platform.length}
+              badge="AI 讲义"
+            />
+          </div>
+        )}
+
+        {tab === "mine" || scope !== "personal" ? (
           <MineTab
             mine={mine}
             mineReady={mineReady}
@@ -145,11 +243,13 @@ export default function MaterialsPage() {
             subjects={subjectsQuery.data ?? []}
             embeddingModel={embeddingModel}
             isLoading={materialsQuery.isLoading}
+            groupId={scope === "group" ? urlGroupId : null}
+            groupName={currentGroup?.name}
             onUploaded={(m) => {
-              queryClient.setQueryData<Material[]>(["materials"], (prev) => [
-                m,
-                ...(prev ?? []),
-              ]);
+              queryClient.setQueryData<Material[]>(
+                ["materials", scope, scope === "group" ? urlGroupId : null],
+                (prev) => [m, ...(prev ?? [])],
+              );
               queryClient.invalidateQueries({ queryKey: ["materials"] });
             }}
             onDelete={(id) => deleteMutation.mutate(id)}
@@ -226,6 +326,8 @@ function MineTab({
   subjects,
   embeddingModel,
   isLoading,
+  groupId,
+  groupName,
   onUploaded,
   onDelete,
   deletingId,
@@ -236,6 +338,9 @@ function MineTab({
   subjects: Subject[];
   embeddingModel?: string;
   isLoading: boolean;
+  /** Phase 7: 当前在某个群 scope 时, 上传默认归到这个群 */
+  groupId?: string | null;
+  groupName?: string;
   onUploaded: (m: Material) => void;
   onDelete: (id: string) => void;
   deletingId?: string;
@@ -245,13 +350,15 @@ function MineTab({
       <MaterialUploader
         subjects={subjects}
         embeddingModel={embeddingModel}
+        groupId={groupId ?? undefined}
+        groupName={groupName}
         onUploaded={onUploaded}
       />
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-muted-foreground">
-            我上传的
+            {groupId ? `群「${groupName ?? "…"}」共享资料` : "我上传的"}
           </h2>
           {mine.length > 0 && (
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -508,6 +615,93 @@ function FilterChip({
       >
         {count}
       </span>
+    </button>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Phase 7: ScopeSwitcher — 个人 / 每个群 / 全部
+// -----------------------------------------------------------------------------
+function ScopeSwitcher({
+  scope,
+  currentGroupId,
+  myGroups,
+  onChange,
+}: {
+  scope: Scope;
+  currentGroupId: string | null;
+  myGroups: Group[];
+  onChange: (next: Scope, groupId?: string) => void;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+      <ScopeChip
+        active={scope === "personal"}
+        icon={null}
+        label="个人"
+        onClick={() => onChange("personal")}
+      />
+      {myGroups.map((g) => (
+        <ScopeChip
+          key={g.id}
+          active={scope === "group" && currentGroupId === g.id}
+          icon={<span>{g.emoji || "👥"}</span>}
+          label={g.name}
+          hint={`${g.member_count} 人`}
+          onClick={() => onChange("group", g.id)}
+        />
+      ))}
+      {myGroups.length > 0 && (
+        <ScopeChip
+          active={scope === "all"}
+          icon={<Users className="h-3 w-3" />}
+          label="全部"
+          hint="个人 + 所有群"
+          onClick={() => onChange("all")}
+        />
+      )}
+      {myGroups.length === 0 && (
+        <Link
+          href="/groups"
+          className="ml-auto inline-flex items-center gap-1 rounded-full border border-dashed border-border px-3 py-1 text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+        >
+          <Users className="h-3 w-3" />
+          去建群 / 加群
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function ScopeChip({
+  active,
+  icon,
+  label,
+  hint,
+  onClick,
+}: {
+  active: boolean;
+  icon: React.ReactNode;
+  label: string;
+  hint?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex max-w-[220px] items-center gap-1.5 rounded-full border px-3 py-1 transition",
+        active
+          ? "border-primary/40 bg-primary/10 text-primary"
+          : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground",
+      )}
+    >
+      {icon}
+      <span className="truncate font-medium">{label}</span>
+      {hint && (
+        <span className="text-[10px] text-muted-foreground">· {hint}</span>
+      )}
     </button>
   );
 }

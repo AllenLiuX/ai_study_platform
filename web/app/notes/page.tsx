@@ -1,5 +1,9 @@
 "use client";
 
+// Phase 7: useSearchParams 需要 client 侧渲染, 禁用预生成
+export const dynamic = "force-dynamic";
+
+import { Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
@@ -9,8 +13,10 @@ import {
   Plus,
   Search,
   Sparkles,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
@@ -18,22 +24,66 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { resolveAgentMeta } from "@/lib/agents";
-import { notesApi } from "@/lib/api";
+import { groupsApi, notesApi } from "@/lib/api";
 import { useAgents } from "@/lib/hooks/useAgents";
 import type { KnowledgeNote } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+type Scope = "personal" | "group" | "all";
+
 export default function NotesPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">加载中…</div>}>
+      <NotesPageInner />
+    </Suspense>
+  );
+}
+
+function NotesPageInner() {
+  const router = useRouter();
+  const search = useSearchParams();
+  const urlScope = (search?.get("scope") ?? "personal") as Scope;
+  const urlGroupId = search?.get("group_id") ?? null;
+  const scope: Scope =
+    urlScope === "group" && urlGroupId ? "group" : urlScope === "all" ? "all" : "personal";
+
   const [q, setQ] = useState("");
   const [agentFilter, setAgentFilter] = useState<string | null>(null);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
 
+  const myGroupsQuery = useQuery({
+    queryKey: ["my-groups"],
+    queryFn: groupsApi.mine,
+    staleTime: 60_000,
+  });
+  const currentGroup = useMemo(
+    () =>
+      scope === "group" && urlGroupId
+        ? (myGroupsQuery.data ?? []).find((g) => g.id === urlGroupId)
+        : null,
+    [scope, urlGroupId, myGroupsQuery.data],
+  );
+
+  const setScope = (next: Scope, groupId?: string) => {
+    const params = new URLSearchParams();
+    if (next === "group" && groupId) {
+      params.set("scope", "group");
+      params.set("group_id", groupId);
+    } else if (next === "all") {
+      params.set("scope", "all");
+    }
+    const qs = params.toString();
+    router.replace(qs ? `/notes?${qs}` : "/notes");
+  };
+
   const notesQuery = useQuery<KnowledgeNote[]>({
-    queryKey: ["notes", { agentFilter, tagFilter }],
+    queryKey: ["notes", scope, urlGroupId, { agentFilter, tagFilter }],
     queryFn: () =>
       notesApi.list({
         agent_key: agentFilter ?? undefined,
         tag: tagFilter ?? undefined,
+        scope: scope === "personal" ? undefined : scope,
+        group_id: scope === "group" && urlGroupId ? urlGroupId : undefined,
       }),
     refetchInterval: (q) => {
       const list = (q.state.data as KnowledgeNote[] | undefined) ?? [];
@@ -88,19 +138,82 @@ export default function NotesPage() {
               知识点笔记
             </div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              我的知识点 · 笔记
+              {scope === "group" && currentGroup
+                ? `${currentGroup.emoji || "👥"} ${currentGroup.name} · 共享笔记`
+                : "我的知识点 · 笔记"}
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              对话中沉淀下来的可复用知识点。每条笔记都参与 RAG —
-              下次对话时,老师会自动召回相关知识点作为参考。
+              {scope === "group" && currentGroup ? (
+                <>
+                  这是「{currentGroup.name}」群里所有成员共享的笔记。
+                  <Link
+                    href={`/groups/${currentGroup.id}`}
+                    className="ml-1 text-primary hover:underline"
+                  >
+                    返回群主页 →
+                  </Link>
+                </>
+              ) : (
+                <>
+                  对话中沉淀下来的可复用知识点。每条笔记都参与 RAG —
+                  下次对话时,老师会自动召回相关知识点作为参考。
+                </>
+              )}
             </p>
           </div>
-          <Link href="/notes/new">
+          <Link href={`/notes/new${scope === "group" && urlGroupId ? `?group_id=${urlGroupId}` : ""}`}>
             <Button size="lg" variant="outline">
               <Plus className="mr-1 h-4 w-4" />
               手动新建
             </Button>
           </Link>
+        </div>
+
+        {/* Phase 7: scope 切换 */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => setScope("personal")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 transition",
+              scope === "personal"
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground",
+            )}
+          >
+            个人
+          </button>
+          {(myGroupsQuery.data ?? []).map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              onClick={() => setScope("group", g.id)}
+              className={cn(
+                "inline-flex max-w-[220px] items-center gap-1.5 rounded-full border px-3 py-1 transition",
+                scope === "group" && urlGroupId === g.id
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground",
+              )}
+            >
+              <span>{g.emoji || "👥"}</span>
+              <span className="truncate font-medium">{g.name}</span>
+            </button>
+          ))}
+          {(myGroupsQuery.data?.length ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={() => setScope("all")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 transition",
+                scope === "all"
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground",
+              )}
+            >
+              <Users className="h-3 w-3" />
+              全部
+            </button>
+          )}
         </div>
 
         <div className="mb-4 flex flex-wrap gap-2">
