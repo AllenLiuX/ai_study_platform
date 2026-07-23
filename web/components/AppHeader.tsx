@@ -48,12 +48,12 @@ export function AppHeader({ className }: AppHeaderProps) {
     supabase.auth.getUser().then(({ data }) => {
       setEmail(data.user?.email ?? null);
     });
-    // 只有登录后再查一次是否 admin, 结果缓存在 sessionStorage 里避免每次导航都请求
+    // 缓存只用于乐观展示；每次挂载仍向后端复核。
+    // 这样管理员名单更新后，无需用户清 sessionStorage 或重新登录。
     (async () => {
       try {
         const cached = sessionStorage.getItem("__is_admin__");
         if (cached === "1") setIsAdmin(true);
-        else if (cached === "0") return;
         const me = await adminApi.me();
         setIsAdmin(!!me.is_admin);
         sessionStorage.setItem("__is_admin__", me.is_admin ? "1" : "0");
