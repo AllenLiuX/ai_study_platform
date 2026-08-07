@@ -9,6 +9,7 @@ import {
   Notebook,
   Target,
   Users,
+  Wand2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -42,6 +43,13 @@ const SHORTCUTS: Shortcut[] = [
     label: "群组 / 班级",
     desc: "和班级、学习小组共享资料库与笔记，协作学习。",
     icon: Users,
+    isNew: true,
+  },
+  {
+    href: "/practice-studio",
+    label: "练习工坊",
+    desc: "一句话描述想练什么，AI 现场生成可判分练习并保存复用。",
+    icon: Wand2,
     isNew: true,
   },
   {

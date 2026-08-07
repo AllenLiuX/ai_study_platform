@@ -19,6 +19,7 @@ from .routes import lecture as lecture_route
 from .routes import materials as materials_route
 from .routes import notes as notes_route
 from .routes import practice as practice_route
+from .routes import practice_studio as practice_studio_route
 from .routes import roadmaps as roadmaps_route
 from .routes import students as students_route
 
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(agents_route.router, prefix="/api")
     app.include_router(notes_route.router, prefix="/api")
     app.include_router(practice_route.router, prefix="/api")
+    app.include_router(practice_studio_route.router, prefix="/api")
     app.include_router(lecture_route.router, prefix="/api")
     app.include_router(groups_route.router, prefix="/api")
     app.include_router(admin_route.router, prefix="/api")

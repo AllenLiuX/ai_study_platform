@@ -6,6 +6,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  Dumbbell,
   Flag,
   Loader2,
   LockKeyhole,
@@ -25,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { resolveAgentMeta } from "@/lib/agents";
-import { agentsApi, chatApi, roadmapsApi } from "@/lib/api";
+import { agentsApi, chatApi, practiceStudioApi, roadmapsApi } from "@/lib/api";
 import type {
   ChatSession,
   GenerateRoadmapRequest,
@@ -51,6 +52,25 @@ function buildNodePrompt(roadmap: LearningRoadmap, node: RoadmapNode): string {
     `请作为我的老师带我系统学习这个节点：先讲清核心概念和常见误区，再给我可操作的练习或任务来检验掌握。整体对齐我的目标：${roadmap.goal}。`,
   ];
   return lines.filter(Boolean).join("\n");
+}
+
+/** 为某个规划节点拼一段「练习工坊」生成描述，让 AI 出针对这一节的可判分练习。 */
+function buildNodePracticeDescription(
+  roadmap: LearningRoadmap,
+  node: RoadmapNode,
+): string {
+  const lines = [
+    `围绕我的学习规划「${roadmap.title}」中的这个节点，为我生成一套有针对性、以动手做为主的练习。`,
+    `【节点】${node.title}`,
+    node.description ? `节点范围：${node.description}` : "",
+    node.phase ? `所处阶段：${node.phase}` : "",
+    node.mastery_evidence?.length
+      ? `需要达到的掌握标准：${node.mastery_evidence.join("；")}`
+      : "",
+    `整体学习目标：${roadmap.goal}`,
+    "题目请由易到难，覆盖这个节点的核心能力，尽量多用可即时判分的题型，并配简要讲解。",
+  ];
+  return lines.filter(Boolean).join("\n").slice(0, 1900);
 }
 
 const STATUS_META: Record<
@@ -100,6 +120,8 @@ export default function RoadmapPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [startingNodeId, setStartingNodeId] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [practicingNodeId, setPracticingNodeId] = useState<string | null>(null);
+  const [practiceError, setPracticeError] = useState<string | null>(null);
 
   const roadmaps = roadmapsQuery.data ?? [];
   const activeRoadmap =
@@ -189,6 +211,24 @@ export default function RoadmapPage() {
     }
   }
 
+  // 「生成针对练习」：用练习工坊为该节点即时生成一套可判分练习并进入。
+  async function practiceNode(node: RoadmapNode) {
+    if (!activeRoadmap || practicingNodeId) return;
+    setPracticingNodeId(node.id);
+    setPracticeError(null);
+    try {
+      const description = buildNodePracticeDescription(activeRoadmap, node);
+      const rec = await practiceStudioApi.generate({ description });
+      void queryClient.invalidateQueries({ queryKey: ["practice-studios"] });
+      router.push(`/practice-studio/${rec.id}`);
+    } catch (err) {
+      setPracticingNodeId(null);
+      setPracticeError(
+        err instanceof Error ? err.message : "生成练习失败，请稍后再试",
+      );
+    }
+  }
+
   return (
     <div className="min-h-dvh bg-app-gradient">
       <AppHeader />
@@ -239,7 +279,10 @@ export default function RoadmapPage() {
                   pending={nodeMutation.isPending}
                   starting={startingNodeId === selectedNode.id}
                   error={startError}
+                  practicing={practicingNodeId === selectedNode.id}
+                  practiceError={practiceError}
                   onStartLearning={() => startLearning(selectedNode)}
+                  onPractice={() => practiceNode(selectedNode)}
                   onStatus={(status, mastery) =>
                     nodeMutation.mutate({
                       roadmapId: activeRoadmap.id,
@@ -481,14 +524,20 @@ function NodeInspector({
   pending,
   starting,
   error,
+  practicing,
+  practiceError,
   onStartLearning,
+  onPractice,
   onStatus,
 }: {
   node: RoadmapNode;
   pending: boolean;
   starting: boolean;
   error: string | null;
+  practicing: boolean;
+  practiceError: string | null;
   onStartLearning: () => void;
+  onPractice: () => void;
   onStatus: (status: RoadmapNodeStatus, mastery?: number) => void;
 }) {
   const meta = STATUS_META[node.status];
@@ -542,6 +591,24 @@ function NodeInspector({
           {error && (
             <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {error}
+            </p>
+          )}
+          <Button
+            className="w-full"
+            variant="secondary"
+            disabled={practicing || starting || pending}
+            onClick={onPractice}
+          >
+            {practicing ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Dumbbell className="mr-1.5 h-4 w-4" />
+            )}
+            {practicing ? "正在出题…" : "生成针对练习"}
+          </Button>
+          {practiceError && (
+            <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {practiceError}
             </p>
           )}
         </div>

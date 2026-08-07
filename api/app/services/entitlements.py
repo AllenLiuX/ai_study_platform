@@ -47,6 +47,8 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
         "groups_created_total": 0,                  # 免费不能建群
         # 练习
         "practice_sessions_per_day": 5,
+        # 练习工坊 (每日 AI 生成定制练习数)
+        "practice_studio_per_day": 5,
         # 听课 (每日新建的 lecture 笔记数; knowledge_notes.source='lecture')
         "lecture_notes_per_day": 3,
     },
@@ -56,6 +58,7 @@ PLAN_LIMITS: dict[Plan, dict[str, Any]] = {
         "materials_total": None,
         "groups_created_total": None,
         "practice_sessions_per_day": None,
+        "practice_studio_per_day": None,
         "lecture_notes_per_day": None,
     },
 }
@@ -66,6 +69,7 @@ LIMIT_LABELS: dict[str, str] = {
     "materials_total": "资料库文件总数",
     "groups_created_total": "已创建群组",
     "practice_sessions_per_day": "每日练习会话",
+    "practice_studio_per_day": "每日 AI 定制练习",
     "lecture_notes_per_day": "每日听课笔记",
 }
 
@@ -274,6 +278,10 @@ def get_usage(user_id: str) -> dict[str, int]:
             "practice_sessions",
             [("eq", "owner_id", user_id), ("gte", "started_at", day_since)],
         ),
+        "practice_studio_per_day": _count_recent(
+            "practice_specs",
+            [("eq", "owner_id", user_id), ("gte", "created_at", day_since)],
+        ),
         "lecture_notes_per_day": _count_recent(
             "knowledge_notes",
             [
@@ -293,6 +301,7 @@ _HUMAN_MSGS = {
     "materials_total": "资料库上传已达上限 ({limit} 个)",
     "groups_created_total": "免费版不能创建群组",
     "practice_sessions_per_day": "今日练习次数已用完 ({limit} 次/天)",
+    "practice_studio_per_day": "今日 AI 定制练习次数已用完 ({limit} 次/天)",
     "lecture_notes_per_day": "今日听课笔记数已达上限 ({limit} 次/天)",
 }
 
@@ -334,6 +343,11 @@ def enforce(key: str, user_id: str) -> None:
         used = _count_recent(
             "practice_sessions",
             [("eq", "owner_id", user_id), ("gte", "started_at", day_since)],
+        )
+    elif key == "practice_studio_per_day":
+        used = _count_recent(
+            "practice_specs",
+            [("eq", "owner_id", user_id), ("gte", "created_at", day_since)],
         )
     elif key == "lecture_notes_per_day":
         used = _count_recent(

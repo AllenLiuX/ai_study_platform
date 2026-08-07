@@ -969,3 +969,71 @@ def update_learning_roadmap(
     )
     rows = resp.data or []
     return rows[0] if rows else None
+
+
+# -----------------------------------------------------------------------------
+# Phase 10 · 练习工坊 (practice_specs)
+# -----------------------------------------------------------------------------
+def create_practice_spec(owner_id: str, payload: dict[str, Any]) -> dict:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_specs")
+        .insert({"owner_id": owner_id, **payload})
+        .execute()
+    )
+    rows = resp.data or []
+    if not rows:
+        raise RuntimeError("保存练习失败")
+    return rows[0]
+
+
+def list_practice_specs(owner_id: str) -> list[dict]:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_specs")
+        .select("*")
+        .eq("owner_id", owner_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return resp.data or []
+
+
+def get_practice_spec(spec_id: str, owner_id: str) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_specs")
+        .select("*")
+        .eq("id", spec_id)
+        .eq("owner_id", owner_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def update_practice_spec(
+    spec_id: str, owner_id: str, fields: dict[str, Any]
+) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_specs")
+        .update(fields)
+        .eq("id", spec_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def delete_practice_spec(spec_id: str, owner_id: str) -> bool:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_specs")
+        .delete()
+        .eq("id", spec_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    return bool(resp.data)

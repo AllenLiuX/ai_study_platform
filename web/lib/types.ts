@@ -1,3 +1,5 @@
+import type { PracticeSpec as PracticeSpecType } from "./practice/spec";
+
 // Phase 5: agent_type 不再固定 4 选 1,可以是平台/用户自定义老师的 agent_key
 // 旧 4 个 key 仍有 first-class 支持(用于 lib/agents.ts fallback display)。
 export type BuiltinAgentType =
@@ -242,6 +244,38 @@ export interface GenerateRoadmapRequest {
   target_date?: string | null;
   agent_key?: string | null;
   preferences?: string;
+}
+
+// -----------------------------------------------------------------------------
+// Phase 10: 练习工坊 (Practice Studio)
+// -----------------------------------------------------------------------------
+export interface PracticeSpecRecord {
+  id: string;
+  owner_id: string;
+  title: string;
+  domain: string | null;
+  description: string | null;
+  prompt: string | null;
+  mode: PracticeSpecType["mode"];
+  spec: PracticeSpecType;
+  generated_by_model: string | null;
+  times_used: number;
+  is_favorite: boolean;
+  last_used_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface GeneratePracticeStudioRequest {
+  description: string;
+  domain?: string;
+  difficulty?: string;
+  count?: number;
+}
+
+export interface UpdatePracticeStudioRequest {
+  title?: string;
+  is_favorite?: boolean;
 }
 
 // Phase 1: 学习资料 (上传到 Supabase Storage,后端切片+向量化后供 RAG 检索)

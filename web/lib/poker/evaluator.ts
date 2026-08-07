@@ -50,6 +50,54 @@ export function compareScore(a: number[], b: number[]): number {
   return 0;
 }
 
+const HAND_CATEGORY_NAMES = [
+  "高牌",
+  "一对",
+  "两对",
+  "三条",
+  "顺子",
+  "同花",
+  "葫芦",
+  "四条",
+  "同花顺",
+];
+
+/** 由分数数组得到中文牌型名（含皇家同花顺）。 */
+export function handCategoryName(score: number[] | null): string {
+  if (!score) return "";
+  const cat = score[0];
+  if (cat === 8 && score[1] === 14) return "皇家同花顺";
+  return HAND_CATEGORY_NAMES[cat] ?? "";
+}
+
+// 生成 C(n,5) 的下标组合（n 为 5~7），带缓存。
+const COMBO_CACHE = new Map<number, number[][]>();
+function combos5(n: number): number[][] {
+  const cached = COMBO_CACHE.get(n);
+  if (cached) return cached;
+  const res: number[][] = [];
+  for (let a = 0; a < n; a++)
+    for (let b = a + 1; b < n; b++)
+      for (let c = b + 1; c < n; c++)
+        for (let d = c + 1; d < n; d++)
+          for (let e = d + 1; e < n; e++) res.push([a, b, c, d, e]);
+  COMBO_CACHE.set(n, res);
+  return res;
+}
+
+/** 任意 5~7 张牌里取最优 5 张的分数；不足 5 张返回 null。 */
+export function evaluateBest(cards: PlayingCard[]): number[] | null {
+  if (cards.length < 5) return null;
+  if (cards.length === 5) return eval5(cards);
+  let best: number[] | null = null;
+  for (const combo of combos5(cards.length)) {
+    const hand = combo.map((i) => cards[i]);
+    const score = eval5(hand);
+    if (best === null || compareScore(score, best) > 0) best = score;
+  }
+  return best;
+}
+
 // C(7,5) 的 21 种 5 张组合下标
 const COMBOS_7_5: number[][] = (() => {
   const res: number[][] = [];
@@ -79,43 +127,97 @@ export interface EquityResult {
   iterations: number;
 }
 
+export interface EquityOptions {
+  /** 指定单个对手的两张手牌（优先级最高） */
+  villain?: PlayingCard[] | null;
+  /** 对手可能手牌的组合池（用于「对手范围」，每次迭代随机抽一手） */
+  villainRange?: PlayingCard[][] | null;
+  /** 随机对手数量（仅在未指定手牌/范围时生效） */
+  opponents?: number;
+  iterations?: number;
+}
+
 /**
- * 蒙特卡洛估算 hero 对 1 名对手的胜率。
- * villain 为 null 表示对手随机手牌；board 可为 0~5 张。
+ * 蒙特卡洛估算 hero 对手的胜率，支持：
+ * - 随机对手（可多名 opponents）
+ * - 指定对手手牌 villain
+ * - 对手范围 villainRange（组合池，随机抽样）
+ * hero 需胜过所有对手才算「胜」；与最强对手并列则算「平（分池）」。
  */
 export function equityMonteCarlo(
   hero: PlayingCard[],
   board: PlayingCard[],
-  opts: { villain?: PlayingCard[] | null; iterations?: number } = {},
+  opts: EquityOptions = {},
 ): EquityResult {
   const iterations = opts.iterations ?? 3000;
-  const villain = opts.villain ?? null;
+  const villain = opts.villain && opts.villain.length === 2 ? opts.villain : null;
+  const opponents = Math.max(1, opts.opponents ?? 1);
 
-  const used = new Set(
-    [...hero, ...board, ...(villain ?? [])].map(cardId),
-  );
-  const baseDeck = fullDeck().filter((c) => !used.has(cardId(c)));
+  const heroBoardUsed = new Set([...hero, ...board].map(cardId));
+
+  // 预筛范围：去掉与 hero/已知公共牌冲突的组合
+  let validRange: PlayingCard[][] | null = null;
+  if (!villain && opts.villainRange && opts.villainRange.length) {
+    validRange = opts.villainRange.filter((combo) =>
+      combo.every((c) => !heroBoardUsed.has(cardId(c))),
+    );
+    if (validRange.length === 0) validRange = null;
+  }
 
   const needBoard = 5 - board.length;
+  // 指定手牌或范围时对手固定为 1 名，否则用随机对手人数
+  const oppCount = villain || validRange ? 1 : opponents;
 
   let win = 0;
   let tie = 0;
   let lose = 0;
 
   for (let it = 0; it < iterations; it++) {
-    const drawn = shuffle(baseDeck);
+    const usedThis = new Set(heroBoardUsed);
+    const villainHands: PlayingCard[][] = [];
+
+    if (villain) {
+      villainHands.push(villain);
+      for (const c of villain) usedThis.add(cardId(c));
+    } else if (validRange) {
+      let chosen: PlayingCard[] | null = null;
+      for (let t = 0; t < 12; t++) {
+        const cand = validRange[(Math.random() * validRange.length) | 0];
+        if (cand.every((c) => !usedThis.has(cardId(c)))) {
+          chosen = cand;
+          break;
+        }
+      }
+      if (chosen) {
+        villainHands.push(chosen);
+        for (const c of chosen) usedThis.add(cardId(c));
+      }
+    }
+
+    const deck = shuffle(fullDeck().filter((c) => !usedThis.has(cardId(c))));
     let idx = 0;
-    const villHole = villain ?? [drawn[idx++], drawn[idx++]];
+    while (villainHands.length < oppCount) {
+      villainHands.push([deck[idx++], deck[idx++]]);
+    }
+
     const extraBoard: PlayingCard[] = [];
-    for (let k = 0; k < needBoard; k++) extraBoard.push(drawn[idx++]);
+    for (let k = 0; k < needBoard; k++) extraBoard.push(deck[idx++]);
     const fullBoard = [...board, ...extraBoard];
 
     const heroScore = evaluate7([...hero, ...fullBoard]);
-    const villScore = evaluate7([...villHole, ...fullBoard]);
-    const cmp = compareScore(heroScore, villScore);
-    if (cmp > 0) win++;
-    else if (cmp < 0) lose++;
-    else tie++;
+    let heroLoses = false;
+    let heroTies = false;
+    for (const vh of villainHands) {
+      const cmp = compareScore(heroScore, evaluate7([...vh, ...fullBoard]));
+      if (cmp < 0) {
+        heroLoses = true;
+        break;
+      }
+      if (cmp === 0) heroTies = true;
+    }
+    if (heroLoses) lose++;
+    else if (heroTies) tie++;
+    else win++;
   }
 
   return {

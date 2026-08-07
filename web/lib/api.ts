@@ -38,6 +38,9 @@ import type {
   ModelTierId,
   ModelTierInfo,
   NextQuestionResponse,
+  GeneratePracticeStudioRequest,
+  PracticeSpecRecord,
+  UpdatePracticeStudioRequest,
   PracticeQuestion,
   PracticeSession,
   PracticeSessionStatus,
@@ -778,6 +781,31 @@ export const adminApi = {
     request<{ users: AdminUserRow[] }>(`/api/admin/users?limit=${limit}`),
   topUsers: (limit: number = 10) =>
     request<{ users: AdminTopUser[] }>(`/api/admin/top-users?limit=${limit}`),
+};
+
+// -----------------------------------------------------------------------------
+// Practice Studio (Phase 10: 练习工坊 — AI 生成 + 保存复用定制练习)
+// -----------------------------------------------------------------------------
+export const practiceStudioApi = {
+  list: () => request<PracticeSpecRecord[]>("/api/practice-studio"),
+  get: (id: string) => request<PracticeSpecRecord>(`/api/practice-studio/${id}`),
+  generate: (payload: GeneratePracticeStudioRequest) =>
+    request<PracticeSpecRecord>("/api/practice-studio/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 120_000,
+    }),
+  update: (id: string, payload: UpdatePracticeStudioRequest) =>
+    request<PracticeSpecRecord>(`/api/practice-studio/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  markUsed: (id: string) =>
+    request<PracticeSpecRecord>(`/api/practice-studio/${id}/use`, {
+      method: "POST",
+    }),
+  remove: (id: string) =>
+    request<void>(`/api/practice-studio/${id}`, { method: "DELETE" }),
 };
 
 // -----------------------------------------------------------------------------

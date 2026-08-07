@@ -3,58 +3,15 @@
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { RANK_LABEL } from "@/lib/poker/cards";
+import {
+  buildPreset,
+  comboKey as key,
+  comboLabel,
+  comboWeight as weight,
+  IDX,
+  TOTAL_COMBOS,
+} from "@/lib/poker/range";
 import { cn } from "@/lib/utils";
-
-const IDX = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const TOTAL_COMBOS = 1326;
-
-function rankAt(i: number): number {
-  return 14 - i; // RANKS 从高到低
-}
-
-function comboLabel(i: number, j: number): string {
-  const hi = RANK_LABEL[rankAt(Math.min(i, j))];
-  const lo = RANK_LABEL[rankAt(Math.max(i, j))];
-  if (i === j) return RANK_LABEL[rankAt(i)] + RANK_LABEL[rankAt(i)];
-  return i < j ? `${hi}${lo}s` : `${hi}${lo}o`;
-}
-
-function weight(i: number, j: number): number {
-  if (i === j) return 6; // 口袋对
-  return i < j ? 4 : 12; // 同花 / 非同花
-}
-
-function key(i: number, j: number): string {
-  return `${i}-${j}`;
-}
-
-type Preset = "clear" | "all" | "tight" | "wide";
-
-function buildPreset(preset: Preset): Set<string> {
-  const set = new Set<string>();
-  for (const i of IDX) {
-    for (const j of IDX) {
-      const hi = rankAt(Math.min(i, j));
-      const lo = rankAt(Math.max(i, j));
-      const isPair = i === j;
-      const isSuited = i < j;
-      let take = false;
-      if (preset === "all") take = true;
-      else if (preset === "tight") {
-        if (isPair && rankAt(i) >= 10) take = true; // TT+
-        else if (isSuited && hi === 14 && lo >= 12) take = true; // AKs, AQs
-        else if (!isPair && !isSuited && hi === 14 && lo === 13) take = true; // AKo
-      } else if (preset === "wide") {
-        if (isPair) take = true; // 所有对子
-        else if (isSuited) take = true; // 所有同花
-        else if (hi >= 10 && lo >= 10) take = true; // 非同花大牌
-      }
-      if (take) set.add(key(i, j));
-    }
-  }
-  return set;
-}
 
 /** 起手范围矩阵 widget：13×13，可点选、切换预设。 */
 export function RangeMatrix() {
