@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Gamepad2,
   GraduationCap,
   Headphones,
   LayoutDashboard,
@@ -33,6 +34,7 @@ const NAV_LINKS = [
   { href: "/roadmap", label: "规划", icon: Map },
   { href: "/agents", label: "老师", icon: GraduationCap },
   { href: "/practice", label: "练习", icon: Target },
+  { href: "/widgets", label: "训练台", icon: Gamepad2 },
   { href: "/lecture", label: "听课", icon: Headphones },
   { href: "/materials", label: "资料库", icon: Library },
   { href: "/notes", label: "笔记", icon: Notebook },
