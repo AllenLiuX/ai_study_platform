@@ -39,7 +39,10 @@ import type {
   ModelTierInfo,
   NextQuestionResponse,
   GeneratePracticeStudioRequest,
+  PlanPracticeStudioRequest,
+  PracticeStudioPlan,
   PracticeSpecRecord,
+  RefinePracticeStudioRequest,
   UpdatePracticeStudioRequest,
   PracticeQuestion,
   PracticeSession,
@@ -163,7 +166,11 @@ async function request<T>(
 
   // 组合外部 signal 与内置 timeout signal
   const ctrl = new AbortController();
-  const timeoutId = setTimeout(() => ctrl.abort(new Error("request timeout")), timeoutMs);
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, timeoutMs);
   if (externalSignal) {
     if (externalSignal.aborted) {
       ctrl.abort(externalSignal.reason);
@@ -192,8 +199,8 @@ async function request<T>(
     if (resp.status === 204) return undefined as T;
     return (await resp.json()) as T;
   } catch (err) {
-    if ((err as Error).name === "AbortError") {
-      throw new Error(`请求超时 (${Math.round(timeoutMs / 1000)}s),请检查网络后重试`);
+    if (timedOut || (err as Error).name === "AbortError") {
+      throw new Error(`请求超时 (${Math.round(timeoutMs / 1000)}s),请稍后重试`);
     }
     throw err;
   } finally {
@@ -376,6 +383,14 @@ export const agentsApi = {
     }),
   delete: (agentKey: string) =>
     request<void>(`/api/agents/${agentKey}`, { method: "DELETE" }),
+  /** 发现页：其他用户公开分享的老师 */
+  listPublic: (q?: string) =>
+    request<UserAgent[]>(
+      `/api/agents/public${q ? `?q=${encodeURIComponent(q)}` : ""}`,
+    ),
+  /** 把一个公开老师克隆到自己名下 (返回新建的老师) */
+  clone: (sourceId: string) =>
+    request<UserAgent>(`/api/agents/${sourceId}/clone`, { method: "POST" }),
   /** 让 LLM 根据自然语言描述帮我生成老师配置 (Phase 5 创建表单的"AI 帮我生成"按钮) */
   generateSpec: (description: string, domains: string[] = []) =>
     request<GeneratedAgentSpec>("/api/agents/_generate", {
@@ -789,11 +804,25 @@ export const adminApi = {
 export const practiceStudioApi = {
   list: () => request<PracticeSpecRecord[]>("/api/practice-studio"),
   get: (id: string) => request<PracticeSpecRecord>(`/api/practice-studio/${id}`),
+  /** 第一步：分析描述，产出训练器规划(不写库、不计额度) */
+  plan: (payload: PlanPracticeStudioRequest) =>
+    request<PracticeStudioPlan>("/api/practice-studio/plan", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 90_000,
+    }),
   generate: (payload: GeneratePracticeStudioRequest) =>
     request<PracticeSpecRecord>("/api/practice-studio/generate", {
       method: "POST",
       body: JSON.stringify(payload),
-      timeoutMs: 120_000,
+      timeoutMs: 210_000, // reasoning 模型 + 大 spec 可能较慢，略高于后端超时
+    }),
+  /** 生成后用自然语言迭代修改（改界面 / 加功能 / 调难度…），原地更新 */
+  refine: (id: string, payload: RefinePracticeStudioRequest) =>
+    request<PracticeSpecRecord>(`/api/practice-studio/${id}/refine`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 210_000,
     }),
   update: (id: string, payload: UpdatePracticeStudioRequest) =>
     request<PracticeSpecRecord>(`/api/practice-studio/${id}`, {
@@ -806,6 +835,16 @@ export const practiceStudioApi = {
     }),
   remove: (id: string) =>
     request<void>(`/api/practice-studio/${id}`, { method: "DELETE" }),
+  /** 发现页：其他用户公开分享的训练器 */
+  listPublic: (q?: string) =>
+    request<PracticeSpecRecord[]>(
+      `/api/practice-studio/public${q ? `?q=${encodeURIComponent(q)}` : ""}`,
+    ),
+  /** 把一个公开训练器收藏(克隆)到自己的工坊 */
+  clone: (sourceId: string) =>
+    request<PracticeSpecRecord>(`/api/practice-studio/${sourceId}/clone`, {
+      method: "POST",
+    }),
 };
 
 // -----------------------------------------------------------------------------

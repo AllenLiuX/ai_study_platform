@@ -50,6 +50,9 @@ def _to_user_agent(row: dict) -> UserAgent:
         default_model_tier=row.get("default_model_tier") or "medium",
         subject_id=row.get("subject_id"),
         is_active=bool(row.get("is_active", True)),
+        is_public=bool(row.get("is_public", False)),
+        clone_count=int(row.get("clone_count") or 0),
+        author_name=row.get("author_name"),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
     )
@@ -60,6 +63,28 @@ async def list_agents(user: CurrentUser = Depends(get_current_user)) -> list[Use
     """列出当前用户可见的所有老师 (4 个平台老师 + 用户自己的私有老师)。"""
     rows = repos.list_user_agents(user.id)
     return [_to_user_agent(r) for r in rows]
+
+
+@router.get("/public", response_model=list[UserAgent])
+async def list_public_agents(
+    q: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+) -> list[UserAgent]:
+    """发现页：其他用户公开分享的老师。"""
+    rows = repos.list_public_agents(q=q)
+    return [_to_user_agent(r) for r in rows]
+
+
+@router.post("/{source_id}/clone", response_model=UserAgent, status_code=201)
+async def clone_agent(
+    source_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> UserAgent:
+    """把一个公开老师「添加到我的老师」= 克隆一份到自己名下。"""
+    row = repos.clone_public_agent(viewer_id=user.id, source_id=source_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="老师不存在或未公开")
+    return _to_user_agent(row)
 
 
 @router.get("/{agent_key}", response_model=UserAgent)
@@ -99,6 +124,7 @@ async def create_agent(
         "domains": payload.domains,
         "default_model_tier": payload.default_model_tier,
         "subject_id": payload.subject_id,
+        "is_public": payload.is_public,
     }
     try:
         row = repos.create_user_agent(owner_id=user.id, payload=db_payload)

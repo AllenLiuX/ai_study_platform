@@ -60,7 +60,7 @@ function buildNodePracticeDescription(
   node: RoadmapNode,
 ): string {
   const lines = [
-    `围绕我的学习规划「${roadmap.title}」中的这个节点，为我生成一套有针对性、以动手做为主的练习。`,
+    `围绕我的学习规划「${roadmap.title}」中的这个节点，为我造一台有针对性、能反复上手练的交互式训练器。`,
     `【节点】${node.title}`,
     node.description ? `节点范围：${node.description}` : "",
     node.phase ? `所处阶段：${node.phase}` : "",
@@ -68,7 +68,7 @@ function buildNodePracticeDescription(
       ? `需要达到的掌握标准：${node.mastery_evidence.join("；")}`
       : "",
     `整体学习目标：${roadmap.goal}`,
-    "题目请由易到难，覆盖这个节点的核心能力，尽量多用可即时判分的题型，并配简要讲解。",
+    "请选择最贴合这个节点核心能力的训练器形态（模拟器/计时训练/跟读/记忆卡/拖拽/决策沙盘等），重在动手操作与即时反馈。",
   ];
   return lines.filter(Boolean).join("\n").slice(0, 1900);
 }
@@ -211,7 +211,7 @@ export default function RoadmapPage() {
     }
   }
 
-  // 「生成针对练习」：用练习工坊为该节点即时生成一套可判分练习并进入。
+  // 「生成专属训练器」：用练习工坊为该节点即时生成一台交互式训练器并进入。
   async function practiceNode(node: RoadmapNode) {
     if (!activeRoadmap || practicingNodeId) return;
     setPracticingNodeId(node.id);
@@ -224,7 +224,7 @@ export default function RoadmapPage() {
     } catch (err) {
       setPracticingNodeId(null);
       setPracticeError(
-        err instanceof Error ? err.message : "生成练习失败，请稍后再试",
+        err instanceof Error ? err.message : "生成训练器失败，请稍后再试",
       );
     }
   }
@@ -604,7 +604,7 @@ function NodeInspector({
             ) : (
               <Dumbbell className="mr-1.5 h-4 w-4" />
             )}
-            {practicing ? "正在出题…" : "生成针对练习"}
+            {practicing ? "正在生成…" : "生成专属训练器"}
           </Button>
           {practiceError && (
             <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">

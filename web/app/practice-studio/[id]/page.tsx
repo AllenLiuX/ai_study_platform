@@ -1,19 +1,21 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Loader2, Target } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
-import { PracticeRunner } from "@/components/practice-studio/PracticeRunner";
+import { TrainerRefinePanel } from "@/components/practice-studio/TrainerRefinePanel";
+import { TrainerRunner } from "@/components/practice-studio/TrainerRunner";
 import { practiceStudioApi } from "@/lib/api";
 
 export default function PracticeStudioRunPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id;
   const markedRef = useRef(false);
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ["practice-studio", id],
@@ -73,7 +75,29 @@ export default function PracticeStudioRunPage() {
               )}
             </header>
 
-            <PracticeRunner spec={rec.spec} />
+            {rec.spec && "goal" in rec.spec && rec.spec.goal && (
+              <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
+                <Target className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <div>
+                  <div className="text-xs font-semibold text-primary">训练目标</div>
+                  <p className="text-sm leading-5">{rec.spec.goal}</p>
+                </div>
+              </div>
+            )}
+
+            <TrainerRunner
+              key={rec.updated_at ?? rec.id}
+              spec={rec.spec}
+              specId={rec.id}
+            />
+
+            <TrainerRefinePanel
+              specId={rec.id}
+              onUpdated={(updated) => {
+                queryClient.setQueryData(["practice-studio", id], updated);
+                queryClient.invalidateQueries({ queryKey: ["practice-studios"] });
+              }}
+            />
           </>
         )}
       </main>

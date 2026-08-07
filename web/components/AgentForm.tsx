@@ -95,6 +95,7 @@ export function AgentForm({
     (initial?.domains ?? []).join(", "),
   );
   const [tier, setTier] = useState<ModelTierId>(initial?.default_model_tier ?? "medium");
+  const [isPublic, setIsPublic] = useState(initial?.is_public ?? false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<Set<string>>(
     new Set(initial?.default_material_ids ?? []),
   );
@@ -209,6 +210,7 @@ export function AgentForm({
         default_material_ids: Array.from(selectedMaterialIds),
         domains,
         default_model_tier: tier,
+        is_public: isPublic,
       };
       await onSubmit(update, "update");
     } else {
@@ -223,6 +225,7 @@ export function AgentForm({
         default_material_ids: Array.from(selectedMaterialIds),
         domains,
         default_model_tier: tier,
+        is_public: isPublic,
       };
       await onSubmit(create, "create");
     }
@@ -467,6 +470,36 @@ export function AgentForm({
           ))}
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setIsPublic((v) => !v)}
+        className={cn(
+          "flex w-full items-center justify-between gap-3 rounded-xl border p-4 text-left transition",
+          isPublic ? "border-primary bg-primary/5" : "border-border hover:border-primary/40",
+        )}
+      >
+        <div className="min-w-0">
+          <div className="text-sm font-medium">公开到「发现」页</div>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            开启后，其他用户能在发现页搜到这位老师并「添加到我的老师」使用。
+            系统只分享人格与开场问题，不会带上你绑定的私有资料。
+          </p>
+        </div>
+        <span
+          className={cn(
+            "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition",
+            isPublic ? "bg-primary" : "bg-secondary",
+          )}
+        >
+          <span
+            className={cn(
+              "inline-block h-5 w-5 transform rounded-full bg-white shadow transition",
+              isPublic ? "translate-x-5" : "translate-x-0.5",
+            )}
+          />
+        </span>
+      </button>
 
       {submitError && (
         <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Compass,
   Gamepad2,
   GraduationCap,
   Headphones,
@@ -36,6 +37,7 @@ const NAV_LINKS = [
   { href: "/agents", label: "老师", icon: GraduationCap },
   { href: "/practice", label: "练习", icon: Target },
   { href: "/practice-studio", label: "工坊", icon: Wand2 },
+  { href: "/discover", label: "发现", icon: Compass },
   { href: "/widgets", label: "训练台", icon: Gamepad2 },
   { href: "/lecture", label: "听课", icon: Headphones },
   { href: "/materials", label: "资料库", icon: Library },
@@ -74,13 +76,14 @@ export function AppHeader({ className }: AppHeaderProps) {
 
   const chatActive = pathname?.startsWith("/chat") ?? false;
 
+  // 只在精确匹配或子路径 (href + "/") 时高亮，避免 /practice 命中 /practice-studio
+  const isNavActive = (href: string) =>
+    pathname === href || (pathname?.startsWith(href + "/") ?? false);
+
   const renderNavLinks = (compact = false) => (
     <>
       {NAV_LINKS.map((link) => {
-        const active =
-          link.href === "/dashboard"
-            ? pathname === "/dashboard"
-            : pathname?.startsWith(link.href);
+        const active = isNavActive(link.href);
         const Icon = "icon" in link ? link.icon : undefined;
         return (
           <Link
@@ -106,7 +109,7 @@ export function AppHeader({ className }: AppHeaderProps) {
           className={cn(
             "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition",
             compact && "px-3 py-1",
-            pathname?.startsWith("/admin")
+            isNavActive("/admin")
               ? "bg-primary/10 text-primary"
               : "text-muted-foreground hover:bg-secondary hover:text-foreground",
           )}

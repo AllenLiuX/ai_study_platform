@@ -2,9 +2,47 @@
 
 from __future__ import annotations
 
+import logging
+import re
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from .supabase_client import get_admin_client
+
+logger = logging.getLogger(__name__)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _sanitize_ilike(q: str | None) -> str:
+    """清理用户搜索词用于 ilike，去掉会破坏 PostgREST or() 语法的字符。"""
+    return re.sub(r"[,%()\\*]", " ", q or "").strip()[:60]
+
+
+def _attach_author_names(
+    rows: list[dict], *, id_key: str = "owner_id", out_key: str = "author_name"
+) -> None:
+    """给一批行就地补上作者昵称 (student_profiles.name)。取不到则 None。"""
+    ids = list({r.get(id_key) for r in rows if r.get(id_key)})
+    name_by_uid: dict[str, str | None] = {}
+    if ids:
+        try:
+            resp = (
+                get_admin_client()
+                .table("student_profiles")
+                .select("user_id, name")
+                .in_("user_id", ids)
+                .execute()
+            )
+            for row in resp.data or []:
+                name_by_uid[row["user_id"]] = row.get("name")
+        except Exception as exc:  # pragma: no cover
+            logger.debug("attach author names failed: %s", exc)
+    for r in rows:
+        r[out_key] = name_by_uid.get(r.get(id_key))
 
 
 # -----------------------------------------------------------------------------
@@ -397,6 +435,111 @@ def delete_user_agent(*, agent_key: str, owner_id: str) -> bool:
         .execute()
     )
     return bool(resp.data)
+
+
+def list_public_agents(q: str | None = None, limit: int = 60) -> list[dict]:
+    """发现页：公开的用户自建老师，热度(被克隆次数)+更新时间倒序，附作者昵称。"""
+    client = get_admin_client()
+    query = (
+        client.table("user_agents")
+        .select("*")
+        .eq("owner_type", "user")
+        .eq("is_public", True)
+        .eq("is_active", True)
+    )
+    term = _sanitize_ilike(q)
+    if term:
+        query = query.or_(
+            f"display_name.ilike.%{term}%,tagline.ilike.%{term}%,role.ilike.%{term}%"
+        )
+    resp = (
+        query.order("clone_count", desc=True)
+        .order("updated_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    rows = resp.data or []
+    _attach_author_names(rows)
+    return rows
+
+
+def clone_public_agent(*, viewer_id: str, source_id: str) -> dict | None:
+    """把公开老师克隆到 viewer 名下 (新 agent_key)。同来源已克隆则直接复用。"""
+    client = get_admin_client()
+    src_resp = (
+        client.table("user_agents")
+        .select("*")
+        .eq("id", source_id)
+        .eq("is_public", True)
+        .eq("is_active", True)
+        .maybe_single()
+        .execute()
+    )
+    source = src_resp.data if src_resp else None
+    if not source:
+        return None
+
+    # 已经拥有(自己就是作者)则不必克隆
+    if source.get("owner_id") == viewer_id:
+        return source
+
+    existing = (
+        client.table("user_agents")
+        .select("*")
+        .eq("owner_id", viewer_id)
+        .eq("cloned_from", source_id)
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return existing.data[0]
+
+    base = (
+        re.sub(r"[^a-z0-9_\-]+", "_", (source.get("agent_key") or "agent").lower())
+        .strip("_-")[:40]
+        or "agent"
+    )
+    new_key = f"agent-{uuid.uuid4().hex[:10]}"
+    for _ in range(6):
+        candidate = f"{base}-{uuid.uuid4().hex[:6]}"
+        hit = (
+            client.table("user_agents")
+            .select("id")
+            .eq("agent_key", candidate)
+            .maybe_single()
+            .execute()
+        )
+        if not (hit and hit.data):
+            new_key = candidate
+            break
+
+    row = {
+        "owner_type": "user",
+        "owner_id": viewer_id,
+        "agent_key": new_key,
+        "display_name": source.get("display_name") or new_key,
+        "emoji": source.get("emoji") or "🎓",
+        "tagline": source.get("tagline"),
+        "role": source.get("role"),
+        "system_prompt": source.get("system_prompt") or "",
+        "starter_prompts": source.get("starter_prompts") or [],
+        "default_material_ids": [],  # 别人的资料引用不带过来
+        "domains": source.get("domains") or [],
+        "default_model_tier": source.get("default_model_tier") or "medium",
+        "subject_id": source.get("subject_id"),
+        "is_public": False,
+        "cloned_from": source_id,
+    }
+    ins = client.table("user_agents").insert(row).execute()
+    created = (ins.data or [None])[0]
+    try:
+        client.table("user_agents").update(
+            {"clone_count": int(source.get("clone_count") or 0) + 1}
+        ).eq("id", source_id).execute()
+    except Exception as exc:  # pragma: no cover
+        logger.debug("bump agent clone_count failed: %s", exc)
+    return created
 
 
 # -----------------------------------------------------------------------------
@@ -1037,3 +1180,108 @@ def delete_practice_spec(spec_id: str, owner_id: str) -> bool:
         .execute()
     )
     return bool(resp.data)
+
+
+def list_public_practice_specs(
+    q: str | None = None, domain: str | None = None, limit: int = 60
+) -> list[dict]:
+    """发现页：公开的训练器，使用热度倒序，附作者昵称。"""
+    client = get_admin_client()
+    query = client.table("practice_specs").select("*").eq("is_public", True)
+    if domain:
+        query = query.eq("domain", domain)
+    term = _sanitize_ilike(q)
+    if term:
+        query = query.or_(
+            f"title.ilike.%{term}%,description.ilike.%{term}%,domain.ilike.%{term}%"
+        )
+    resp = (
+        query.order("times_used", desc=True)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    rows = resp.data or []
+    _attach_author_names(rows)
+    return rows
+
+
+def get_public_practice_spec(spec_id: str) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("practice_specs")
+        .select("*")
+        .eq("id", spec_id)
+        .eq("is_public", True)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def bump_practice_spec_usage(spec_id: str) -> dict | None:
+    """按 id 自增 times_used + 刷新 last_used_at (不做 owner 过滤，供公开运行计数)。"""
+    client = get_admin_client()
+    cur = (
+        client.table("practice_specs")
+        .select("times_used")
+        .eq("id", spec_id)
+        .maybe_single()
+        .execute()
+    )
+    if not (cur and cur.data):
+        return None
+    resp = (
+        client.table("practice_specs")
+        .update(
+            {
+                "times_used": int(cur.data.get("times_used") or 0) + 1,
+                "last_used_at": _now_iso(),
+            }
+        )
+        .eq("id", spec_id)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def clone_practice_spec(*, viewer_id: str, source_id: str) -> dict | None:
+    """把公开训练器复制到 viewer 的工坊。同来源已克隆则复用。"""
+    client = get_admin_client()
+    source = get_public_practice_spec(source_id)
+    if not source:
+        return None
+    if source.get("owner_id") == viewer_id:
+        return source
+    existing = (
+        client.table("practice_specs")
+        .select("*")
+        .eq("owner_id", viewer_id)
+        .eq("cloned_from", source_id)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return existing.data[0]
+    row = {
+        "owner_id": viewer_id,
+        "title": source.get("title") or "训练器",
+        "domain": source.get("domain"),
+        "description": source.get("description"),
+        "prompt": source.get("prompt"),
+        "mode": source.get("mode") or "template",
+        "spec": source.get("spec"),
+        "generated_by_model": source.get("generated_by_model"),
+        "is_public": False,
+        "cloned_from": source_id,
+    }
+    ins = client.table("practice_specs").insert(row).execute()
+    created = (ins.data or [None])[0]
+    try:
+        client.table("practice_specs").update(
+            {"clone_count": int(source.get("clone_count") or 0) + 1}
+        ).eq("id", source_id).execute()
+    except Exception as exc:  # pragma: no cover
+        logger.debug("bump spec clone_count failed: %s", exc)
+    return created

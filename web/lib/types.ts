@@ -1,4 +1,7 @@
-import type { PracticeSpec as PracticeSpecType } from "./practice/spec";
+import type {
+  PracticeSpec as PracticeSpecType,
+  TrainerSpec as TrainerSpecType,
+} from "./practice/spec";
 
 // Phase 5: agent_type 不再固定 4 选 1,可以是平台/用户自定义老师的 agent_key
 // 旧 4 个 key 仍有 first-class 支持(用于 lib/agents.ts fallback display)。
@@ -256,11 +259,14 @@ export interface PracticeSpecRecord {
   domain: string | null;
   description: string | null;
   prompt: string | null;
-  mode: PracticeSpecType["mode"];
-  spec: PracticeSpecType;
+  mode: "structured" | "sandbox" | "template" | "app";
+  spec: PracticeSpecType | TrainerSpecType;
   generated_by_model: string | null;
   times_used: number;
   is_favorite: boolean;
+  is_public?: boolean;
+  clone_count?: number;
+  author_name?: string | null;
   last_used_at: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -271,11 +277,48 @@ export interface GeneratePracticeStudioRequest {
   domain?: string;
   difficulty?: string;
   count?: number;
+  // 两步流程：规划确认后回传的形态与元数据
+  template_id?: string; // 模板 id / "app" / 不传=AI 自动
+  goal?: string;
+  title?: string;
+}
+
+export interface PlanPracticeStudioRequest {
+  description: string;
+  domain?: string;
+  difficulty?: string;
+}
+
+export type TrainerTemplateChoice =
+  | "auto"
+  | "app"
+  | "simulator"
+  | "timed_drill"
+  | "audio_trainer"
+  | "flashcards_srs"
+  | "drag_order"
+  | "decision_tree";
+
+export interface PracticeStudioPlan {
+  title: string;
+  domain: string;
+  difficulty?: string | null;
+  kind: "template" | "app";
+  template_id?: string | null;
+  template_label?: string | null;
+  goal: string;
+  outline: string[];
+  generation_prompt: string;
+}
+
+export interface RefinePracticeStudioRequest {
+  instruction: string;
 }
 
 export interface UpdatePracticeStudioRequest {
   title?: string;
   is_favorite?: boolean;
+  is_public?: boolean;
 }
 
 // Phase 1: 学习资料 (上传到 Supabase Storage,后端切片+向量化后供 RAG 检索)
@@ -497,6 +540,9 @@ export interface UserAgent {
   default_model_tier: ModelTierId;
   subject_id: string | null;
   is_active: boolean;
+  is_public?: boolean;
+  clone_count?: number;
+  author_name?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -513,10 +559,12 @@ export interface CreateUserAgentRequest {
   domains?: string[];
   default_model_tier?: ModelTierId;
   subject_id?: string | null;
+  is_public?: boolean;
 }
 
 export type UpdateUserAgentRequest = Partial<CreateUserAgentRequest> & {
   is_active?: boolean;
+  is_public?: boolean;
 };
 
 export interface GeneratedAgentSpec {

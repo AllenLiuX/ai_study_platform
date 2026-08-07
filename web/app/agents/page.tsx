@@ -3,8 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Edit3,
+  Globe,
   GraduationCap,
   Loader2,
+  Lock,
   MessageSquare,
   Plus,
   Sparkles,
@@ -40,6 +42,17 @@ export default function AgentsPage() {
     },
     onError: (err) =>
       setDeleteError(err instanceof Error ? err.message : "删除失败"),
+  });
+
+  const publicMutation = useMutation({
+    mutationFn: ({ agentKey, value }: { agentKey: string; value: boolean }) =>
+      agentsApi.update(agentKey, { is_public: value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      setDeleteError(null);
+    },
+    onError: (err) =>
+      setDeleteError(err instanceof Error ? err.message : "操作失败"),
   });
 
   async function startChat(agent: UserAgent) {
@@ -151,6 +164,12 @@ export default function AgentsPage() {
                       agent={a}
                       onStart={() => startChat(a)}
                       busy={openingKey === a.agent_key}
+                      onTogglePublic={() =>
+                        publicMutation.mutate({
+                          agentKey: a.agent_key,
+                          value: !a.is_public,
+                        })
+                      }
                       onDelete={() => {
                         if (
                           !window.confirm(
@@ -177,11 +196,13 @@ function AgentCard({
   onStart,
   busy,
   onDelete,
+  onTogglePublic,
 }: {
   agent: UserAgent;
   onStart: () => void;
   busy: boolean;
   onDelete: (() => void) | null;
+  onTogglePublic?: (() => void) | null;
 }) {
   const isPlatform = agent.owner_type === "platform";
   return (
@@ -203,6 +224,12 @@ function AgentCard({
             {!isPlatform && (
               <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
                 自定义
+              </span>
+            )}
+            {!isPlatform && agent.is_public && (
+              <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                <Globe className="h-2.5 w-2.5" />
+                已公开
               </span>
             )}
           </div>
@@ -247,6 +274,23 @@ function AgentCard({
         </Button>
         {!isPlatform && (
           <>
+            {onTogglePublic && (
+              <button
+                type="button"
+                onClick={onTogglePublic}
+                className={cn(
+                  "rounded-md border border-border p-1.5 transition hover:bg-secondary",
+                  agent.is_public ? "text-emerald-600" : "text-muted-foreground",
+                )}
+                title={agent.is_public ? "已公开 · 点击转为私有" : "公开到发现页"}
+              >
+                {agent.is_public ? (
+                  <Globe className="h-3.5 w-3.5" />
+                ) : (
+                  <Lock className="h-3.5 w-3.5" />
+                )}
+              </button>
+            )}
             <Link
               href={`/agents/${agent.agent_key}/edit`}
               className="rounded-md border border-border p-1.5 text-muted-foreground transition hover:bg-secondary"

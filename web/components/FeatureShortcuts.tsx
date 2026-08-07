@@ -48,7 +48,7 @@ const SHORTCUTS: Shortcut[] = [
   {
     href: "/practice-studio",
     label: "练习工坊",
-    desc: "一句话描述想练什么，AI 现场生成可判分练习并保存复用。",
+    desc: "描述想练什么，AI 造一台交互式训练器（模拟器/计时/跟读…），保存复用。",
     icon: Wand2,
     isNew: true,
   },

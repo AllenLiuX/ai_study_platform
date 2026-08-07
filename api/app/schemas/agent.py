@@ -34,6 +34,9 @@ class UserAgent(BaseModel):
     default_model_tier: str = "medium"
     subject_id: str | None = None
     is_active: bool = True
+    is_public: bool = False
+    clone_count: int = 0
+    author_name: str | None = None  # 发现页展示作者昵称 (克隆来源作者)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -57,6 +60,7 @@ class CreateUserAgentRequest(BaseModel):
     domains: list[str] = Field(default_factory=list, max_length=10)
     default_model_tier: Literal["low", "medium", "high", "extra_high", "max"] = "medium"
     subject_id: str | None = None
+    is_public: bool = False
 
     @field_validator("agent_key")
     @classmethod
@@ -85,6 +89,7 @@ class UpdateUserAgentRequest(BaseModel):
     default_model_tier: Literal["low", "medium", "high", "extra_high", "max"] | None = None
     subject_id: str | None = None
     is_active: bool | None = None
+    is_public: bool | None = None
 
     def to_db_fields(self) -> dict[str, Any]:
         out: dict[str, Any] = {}

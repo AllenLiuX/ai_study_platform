@@ -2,52 +2,59 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AppWindow,
+  ArrowUpDown,
   Clock,
-  Loader2,
-  Sparkles,
+  GitBranch,
+  Globe,
+  Layers,
+  ListChecks,
+  Lock,
+  type LucideIcon,
+  SlidersHorizontal,
   Star,
+  Timer,
   Trash2,
+  Volume2,
   Wand2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
-import { Button } from "@/components/ui/button";
+import { TrainerComposer } from "@/components/practice-studio/TrainerComposer";
 import { practiceStudioApi } from "@/lib/api";
 import type { PracticeSpecRecord } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const EXAMPLES = [
-  "给我 10 道高一函数图像的选择题，带即时讲解",
-  "日语 N5 动词变位配对练习，附例句",
-  "德州扑克翻牌圈决策训练，讲清底池赔率",
-  "考研英语长难句分析，5 句填空 + 结构讲解",
-  "Python 列表推导式 8 道由易到难的填空题",
-  "初中物理浮力概念的判断题 + 计算题",
-];
+// 训练器类型 → 展示用图标与标签
+const TRAINER_META: Record<string, { label: string; icon: LucideIcon }> = {
+  simulator: { label: "参数模拟器", icon: SlidersHorizontal },
+  timed_drill: { label: "计时训练", icon: Timer },
+  audio_trainer: { label: "音频跟读", icon: Volume2 },
+  flashcards_srs: { label: "记忆卡", icon: Layers },
+  drag_order: { label: "拖拽构造", icon: ArrowUpDown },
+  decision_tree: { label: "决策沙盘", icon: GitBranch },
+};
+
+function trainerMeta(rec: PracticeSpecRecord): { label: string; icon: LucideIcon } {
+  const spec = rec.spec as { kind?: string; template_id?: string } | null;
+  if (spec?.kind === "template" && spec.template_id && TRAINER_META[spec.template_id]) {
+    return TRAINER_META[spec.template_id];
+  }
+  if (spec?.kind === "app" || rec.mode === "app") {
+    return { label: "定制应用", icon: AppWindow };
+  }
+  return { label: "练习集", icon: ListChecks };
+}
 
 export default function PracticeStudioPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [description, setDescription] = useState("");
-  const [error, setError] = useState<string | null>(null);
 
   const listQuery = useQuery({
     queryKey: ["practice-studios"],
     queryFn: practiceStudioApi.list,
     staleTime: 30_000,
-  });
-
-  const generate = useMutation({
-    mutationFn: () =>
-      practiceStudioApi.generate({ description: description.trim() }),
-    onSuccess: (rec) => {
-      queryClient.invalidateQueries({ queryKey: ["practice-studios"] });
-      router.push(`/practice-studio/${rec.id}`);
-    },
-    onError: (err) =>
-      setError(err instanceof Error ? err.message : "生成失败，请稍后再试"),
   });
 
   const remove = useMutation({
@@ -63,14 +70,12 @@ export default function PracticeStudioPage() {
       queryClient.invalidateQueries({ queryKey: ["practice-studios"] }),
   });
 
-  function submit() {
-    setError(null);
-    if (description.trim().length < 4) {
-      setError("请再具体描述一下你想练什么");
-      return;
-    }
-    generate.mutate();
-  }
+  const setPublic = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) =>
+      practiceStudioApi.update(id, { is_public: value }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["practice-studios"] }),
+  });
 
   const records = listQuery.data ?? [];
 
@@ -87,64 +92,29 @@ export default function PracticeStudioPage() {
             </span>
           </div>
           <p className="text-sm text-muted-foreground">
-            用一句话描述你想练什么，AI 现场为你生成一套可动手做、能即时判分的练习，并保存下来随时复用。
+            描述你想练什么，AI 为你造一台<strong className="font-semibold text-foreground">交互式训练器</strong>——模拟器、计时训练、跟读、记忆卡、决策沙盘……一次生成，长期复用。
+            <span className="ml-1 text-muted-foreground/80">（想刷题请用「练习」）</span>
           </p>
         </header>
 
-        {/* 生成区 */}
-        <section className="rounded-3xl border border-border bg-card p-5 shadow-card">
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            placeholder="例如：给我 10 道高一函数单调性的选择题，每题带讲解"
-            disabled={generate.isPending}
-            className="w-full resize-y rounded-2xl border border-input bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex}
-                type="button"
-                disabled={generate.isPending}
-                onClick={() => setDescription(ex)}
-                className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-primary"
-              >
-                {ex}
-              </button>
-            ))}
-          </div>
-          {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">
-              约 10~30 秒生成
-            </span>
-            <Button onClick={submit} disabled={generate.isPending}>
-              {generate.isPending ? (
-                <>
-                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                  正在生成…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-1.5 h-4 w-4" />
-                  生成练习
-                </>
-              )}
-            </Button>
-          </div>
-        </section>
+        {/* 生成区：两步式（描述 → 规划确认 → 生成） */}
+        <TrainerComposer
+          onCreated={(rec) => {
+            queryClient.invalidateQueries({ queryKey: ["practice-studios"] });
+            router.push(`/practice-studio/${rec.id}`);
+          }}
+        />
 
         {/* 我的练习 */}
         <section className="space-y-3">
           <h2 className="text-sm font-semibold tracking-tight text-muted-foreground">
-            我的练习
+            我的训练器
           </h2>
           {listQuery.isLoading ? (
             <div className="h-24 animate-pulse rounded-2xl border border-border bg-card" />
           ) : records.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center text-sm text-muted-foreground">
-              还没有练习。上面描述一下，生成你的第一套吧。
+              还没有训练器。上面描述一下，造出你的第一台吧。
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -158,6 +128,9 @@ export default function PracticeStudioPage() {
                   }}
                   onToggleFav={() =>
                     favorite.mutate({ id: rec.id, value: !rec.is_favorite })
+                  }
+                  onTogglePublic={() =>
+                    setPublic.mutate({ id: rec.id, value: !rec.is_public })
                   }
                 />
               ))}
@@ -174,41 +147,66 @@ function RecordCard({
   onOpen,
   onDelete,
   onToggleFav,
+  onTogglePublic,
 }: {
   rec: PracticeSpecRecord;
   onOpen: () => void;
   onDelete: () => void;
   onToggleFav: () => void;
+  onTogglePublic: () => void;
 }) {
-  const blockCount = rec.spec?.blocks?.length ?? 0;
+  const meta = trainerMeta(rec);
+  const TypeIcon = meta.icon;
   return (
     <div className="group flex flex-col rounded-2xl border border-border bg-card p-4 shadow-card transition hover:border-primary/40">
       <div className="mb-1 flex items-start justify-between gap-2">
         <button
           type="button"
           onClick={onOpen}
-          className="min-w-0 flex-1 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <TypeIcon className="h-4 w-4" />
+          </span>
           <h3 className="truncate text-sm font-semibold tracking-tight">
             {rec.title}
           </h3>
         </button>
-        <button
-          type="button"
-          onClick={onToggleFav}
-          className={cn(
-            "shrink-0 rounded-full p-1 transition",
-            rec.is_favorite
-              ? "text-amber-500"
-              : "text-muted-foreground hover:text-amber-500",
-          )}
-          title={rec.is_favorite ? "取消收藏" : "收藏"}
-        >
-          <Star
-            className="h-4 w-4"
-            fill={rec.is_favorite ? "currentColor" : "none"}
-          />
-        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onTogglePublic}
+            className={cn(
+              "rounded-full p-1 transition",
+              rec.is_public
+                ? "text-emerald-600"
+                : "text-muted-foreground hover:text-emerald-600",
+            )}
+            title={rec.is_public ? "已公开 · 点击转为私有" : "公开到发现页"}
+          >
+            {rec.is_public ? (
+              <Globe className="h-4 w-4" />
+            ) : (
+              <Lock className="h-4 w-4" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={onToggleFav}
+            className={cn(
+              "rounded-full p-1 transition",
+              rec.is_favorite
+                ? "text-amber-500"
+                : "text-muted-foreground hover:text-amber-500",
+            )}
+            title={rec.is_favorite ? "取消收藏" : "收藏"}
+          >
+            <Star
+              className="h-4 w-4"
+              fill={rec.is_favorite ? "currentColor" : "none"}
+            />
+          </button>
+        </div>
       </div>
       <button type="button" onClick={onOpen} className="flex-1 text-left">
         {rec.description && (
@@ -222,9 +220,7 @@ function RecordCard({
           <span className="rounded-full bg-secondary px-2 py-0.5 font-medium text-secondary-foreground">
             {rec.domain || "通用"}
           </span>
-          <span>
-            {rec.mode === "sandbox" ? "自定义界面" : `${blockCount} 个练习块`}
-          </span>
+          <span>{meta.label}</span>
           {rec.times_used > 0 && (
             <span className="flex items-center gap-0.5">
               <Clock className="h-3 w-3" />
