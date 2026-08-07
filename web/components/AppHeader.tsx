@@ -7,6 +7,7 @@ import {
   Library,
   Loader2,
   LogOut,
+  Map,
   MessageSquare,
   Notebook,
   Sparkles,
@@ -29,6 +30,7 @@ interface AppHeaderProps {
 
 const NAV_LINKS = [
   { href: "/dashboard", label: "驾驶舱" },
+  { href: "/roadmap", label: "规划", icon: Map },
   { href: "/agents", label: "老师", icon: GraduationCap },
   { href: "/practice", label: "练习", icon: Target },
   { href: "/lecture", label: "听课", icon: Headphones },
@@ -48,17 +50,13 @@ export function AppHeader({ className }: AppHeaderProps) {
     supabase.auth.getUser().then(({ data }) => {
       setEmail(data.user?.email ?? null);
     });
-    // 缓存只用于乐观展示；每次挂载仍向后端复核。
-    // 这样管理员名单更新后，无需用户清 sessionStorage 或重新登录。
+    // 管理入口必须以后端实时鉴权结果为准，不能使用跨账号的浏览器缓存。
     (async () => {
       try {
-        const cached = sessionStorage.getItem("__is_admin__");
-        if (cached === "1") setIsAdmin(true);
         const me = await adminApi.me();
         setIsAdmin(!!me.is_admin);
-        sessionStorage.setItem("__is_admin__", me.is_admin ? "1" : "0");
       } catch {
-        /* 未登录 / 网络失败 → 保持默认 false */
+        setIsAdmin(false);
       }
     })();
   }, []);
@@ -66,11 +64,6 @@ export function AppHeader({ className }: AppHeaderProps) {
   async function handleLogout() {
     const supabase = createSupabaseBrowserClient();
     await supabase.auth.signOut();
-    try {
-      sessionStorage.removeItem("__is_admin__");
-    } catch {
-      /* 忽略 */
-    }
     router.replace("/login");
     router.refresh();
   }
@@ -130,21 +123,31 @@ export function AppHeader({ className }: AppHeaderProps) {
       )}
     >
       <div className="container flex h-16 items-center justify-between gap-2">
-        <div className="flex items-center gap-5 min-w-0">
-          <Link href="/dashboard" className="flex items-center gap-2 min-w-0">
+        <div className="flex min-w-0 flex-1 items-center gap-4">
+          <Link
+            href="/dashboard"
+            className="flex shrink-0 items-center gap-2 min-w-0"
+          >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground text-background">
               <Sparkles className="h-5 w-5" />
             </span>
-            <div className="flex flex-col leading-tight min-w-0">
+            <div className="hidden flex-col leading-tight min-w-0 lg:flex">
               <span className="text-[15px] font-semibold tracking-tight truncate">
                 AI 自适应学习平台
               </span>
-              <span className="hidden text-[11px] text-muted-foreground sm:inline">
+              <span className="hidden text-[11px] text-muted-foreground xl:inline">
                 Your adaptive AI tutor
               </span>
             </div>
           </Link>
-          <nav className="hidden items-center gap-1 sm:flex">
+          {/* 桌面导航:内容超宽时内部横向滚动,避免与右侧按钮重叠 */}
+          <nav
+            className={cn(
+              "hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto sm:flex",
+              "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+              "[-webkit-overflow-scrolling:touch]",
+            )}
+          >
             {renderNavLinks()}
           </nav>
         </div>
@@ -154,11 +157,11 @@ export function AppHeader({ className }: AppHeaderProps) {
           {email && (
             <Link
               href="/onboarding?edit=true"
-              className="hidden items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm text-muted-foreground transition hover:bg-secondary hover:text-foreground sm:inline-flex"
+              className="hidden items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm text-muted-foreground transition hover:bg-secondary hover:text-foreground xl:inline-flex"
               title="编辑个人资料 / 学习者设定"
             >
               <UserCog className="h-3.5 w-3.5" />
-              <span className="max-w-[180px] truncate">{email}</span>
+              <span className="max-w-[160px] truncate">{email}</span>
             </Link>
           )}
           <Button variant="ghost" size="sm" onClick={handleLogout}>

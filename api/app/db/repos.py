@@ -910,3 +910,62 @@ def delete_group(group_id: str) -> bool:
     client = get_admin_client()
     resp = client.table("groups").delete().eq("id", group_id).execute()
     return bool(resp.data)
+
+
+# -----------------------------------------------------------------------------
+# Learning roadmaps (Phase 9)
+# -----------------------------------------------------------------------------
+def list_learning_roadmaps(owner_id: str) -> list[dict]:
+    client = get_admin_client()
+    resp = (
+        client.table("learning_roadmaps")
+        .select("*")
+        .eq("owner_id", owner_id)
+        .neq("status", "archived")
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    return resp.data or []
+
+
+def get_learning_roadmap(roadmap_id: str, owner_id: str) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("learning_roadmaps")
+        .select("*")
+        .eq("id", roadmap_id)
+        .eq("owner_id", owner_id)
+        .maybe_single()
+        .execute()
+    )
+    return resp.data if resp else None
+
+
+def create_learning_roadmap(owner_id: str, payload: dict[str, Any]) -> dict:
+    client = get_admin_client()
+    resp = (
+        client.table("learning_roadmaps")
+        .insert({"owner_id": owner_id, **payload})
+        .execute()
+    )
+    rows = resp.data or []
+    if not rows:
+        raise RuntimeError("创建学习规划失败")
+    return rows[0]
+
+
+def update_learning_roadmap(
+    roadmap_id: str,
+    owner_id: str,
+    fields: dict[str, Any],
+) -> dict | None:
+    client = get_admin_client()
+    resp = (
+        client.table("learning_roadmaps")
+        .update(fields)
+        .eq("id", roadmap_id)
+        .eq("owner_id", owner_id)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None

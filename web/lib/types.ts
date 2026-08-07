@@ -175,6 +175,7 @@ export interface DailyTask {
   tag: DailyTaskTag | string;
   starter_prompt: string;
   knowledge_point_ids: string[];
+  roadmap_node_id?: string | null;
 }
 
 export interface DailyTasksResponse {
@@ -190,6 +191,57 @@ export interface DashboardResponse {
   recent_sessions: ChatSession[];
   progress: SubjectProgress[];
   tasks: DailyTasksResponse | null;
+}
+
+// Phase 9: 动态学习规划 / 科技树
+export type RoadmapStatus = "draft" | "active" | "completed" | "archived";
+export type RoadmapNodeStatus = "done" | "current" | "open" | "locked" | "review";
+
+export interface RoadmapNode {
+  id: string;
+  title: string;
+  description: string;
+  phase: string;
+  status: RoadmapNodeStatus;
+  estimated_hours: number;
+  prerequisites: string[];
+  mastery_evidence: string[];
+  mastery: number;
+  next_action: string;
+}
+
+export interface RoadmapLane {
+  id: string;
+  title: string;
+  purpose: string;
+  nodes: RoadmapNode[];
+}
+
+export interface LearningRoadmap {
+  id: string;
+  owner_id: string;
+  title: string;
+  goal: string;
+  baseline: string | null;
+  target_date: string | null;
+  weekly_hours: number;
+  agent_key: string | null;
+  status: RoadmapStatus;
+  lanes: RoadmapLane[];
+  version: number;
+  generated_by_model: string | null;
+  generation_context: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface GenerateRoadmapRequest {
+  goal: string;
+  baseline?: string;
+  weekly_hours?: number;
+  target_date?: string | null;
+  agent_key?: string | null;
+  preferences?: string;
 }
 
 // Phase 1: 学习资料 (上传到 Supabase Storage,后端切片+向量化后供 RAG 检索)

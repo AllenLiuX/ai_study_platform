@@ -58,9 +58,11 @@ async def admin_me(user: CurrentUser = Depends(get_current_user)) -> dict:
 # -----------------------------------------------------------------------------
 # 辅助
 # -----------------------------------------------------------------------------
-def _count(table: str, *, where: dict | None = None) -> int:
+def _count(
+    table: str, *, where: dict | None = None, count_column: str = "id"
+) -> int:
     client = get_admin_client()
-    q = client.table(table).select("id", count="exact").limit(1)
+    q = client.table(table).select(count_column, count="exact").limit(1)
     for k, v in (where or {}).items():
         if v is None:
             q = q.is_(k, "null")
@@ -125,14 +127,9 @@ async def overview(_admin: CurrentUser = Depends(require_admin)) -> dict:
     month_ago = now - timedelta(days=30)
     client = get_admin_client()
 
-    # 用户 (auth.users) — 走 admin API 拿总数
-    try:
-        # Admin API 有 total 字段
-        r = client.auth.admin.list_users(page=1, per_page=1)
-        total_users = getattr(r, "total", None) or len(getattr(r, "users", []) or [])
-    except Exception as exc:
-        logger.warning("list users total failed: %s", exc)
-        total_users = 0
+    # 当前 supabase-py 的 list_users() 直接返回 list[User],没有 total 字段。
+    # 分页拉取后计数；MVP 上限 10 万，避免异常配置导致无限请求。
+    total_users = len(_list_auth_users(limit=100_000))
 
     # 活跃用户: 用 chat_messages.role='user' 里 distinct session -> user
     # supabase-py 没有 distinct 直接支持, 拉最近记录去重
@@ -148,14 +145,16 @@ async def overview(_admin: CurrentUser = Depends(require_admin)) -> dict:
             session_ids = list({r["session_id"] for r in (resp.data or []) if r.get("session_id")})
             if not session_ids:
                 return 0
-            # session_id → owner_id
+            # session_id → student_id (0001 schema 的真实列名)
             s = (
                 client.table("chat_sessions")
-                .select("owner_id")
+                .select("student_id")
                 .in_("id", session_ids)
                 .execute()
             )
-            return len({r["owner_id"] for r in (s.data or []) if r.get("owner_id")})
+            return len(
+                {r["student_id"] for r in (s.data or []) if r.get("student_id")}
+            )
         except Exception as exc:
             logger.warning("active users query failed: %s", exc)
             return 0
@@ -185,7 +184,10 @@ async def overview(_admin: CurrentUser = Depends(require_admin)) -> dict:
             "notes_total": _count("knowledge_notes"),
             "practice_sessions_total": _count("practice_sessions"),
             "groups_total": _count("groups"),
-            "group_members_total": _count("group_members"),
+            # group_members 是 (group_id,user_id) 复合主键,没有 id 列。
+            "group_members_total": _count(
+                "group_members", count_column="user_id"
+            ),
         },
     }
 
@@ -308,12 +310,12 @@ async def breakdown(_admin: CurrentUser = Depends(require_admin)) -> dict:
         if sess_ids:
             s = (
                 client.table("chat_sessions")
-                .select("id, agent_type, agent_key")
+                .select("id, agent_type")
                 .in_("id", sess_ids)
                 .execute()
             )
             key_by_sid = {
-                r["id"]: (r.get("agent_key") or r.get("agent_type") or "(unknown)")
+                r["id"]: (r.get("agent_type") or "(unknown)")
                 for r in (s.data or [])
             }
             c: Counter[str] = Counter()
@@ -361,20 +363,34 @@ async def list_users(
     except Exception as exc:
         logger.warning("fetch profiles failed: %s", exc)
 
-    # 消息计数 (sessions → per user)
+    # 消息计数: chat_sessions.student_id → chat_messages.session_id。
+    # chat_sessions 没有 owner_id / message_count 列，需从真实消息聚合。
     msg_count_by_uid: dict[str, int] = defaultdict(int)
     try:
         s = (
             client.table("chat_sessions")
-            .select("id, owner_id, message_count")
-            .in_("owner_id", uids)
+            .select("id, student_id")
+            .in_("student_id", uids)
             .execute()
         )
-        for r in s.data or []:
-            if r.get("owner_id"):
-                msg_count_by_uid[r["owner_id"]] += int(r.get("message_count") or 0)
+        uid_by_session = {
+            r["id"]: r["student_id"]
+            for r in (s.data or [])
+            if r.get("id") and r.get("student_id")
+        }
+        if uid_by_session:
+            m = (
+                client.table("chat_messages")
+                .select("session_id")
+                .in_("session_id", list(uid_by_session))
+                .limit(20_000)
+                .execute()
+            )
+            for row in m.data or []:
+                uid = uid_by_session.get(row.get("session_id"))
+                if uid:
+                    msg_count_by_uid[uid] += 1
     except Exception as exc:
-        # message_count 字段可能不存在, 退化为逐条聚合 (跳过, 太慢)
         logger.warning("session msg counts failed: %s", exc)
 
     # 笔记数 / 资料数 (直接 count per user 慢, 一次拉所有 owner_id 再本地聚合)
@@ -450,29 +466,44 @@ async def top_users(
     limit: int = Query(default=10, ge=1, le=50),
     _admin: CurrentUser = Depends(require_admin),
 ) -> dict:
-    """按最近 30 天消息数排序. 用 chat_sessions 的 message_count 汇总, O(sessions)."""
+    """按最近 30 天真实 chat_messages 数排序."""
     client = get_admin_client()
     since = datetime.now(timezone.utc) - timedelta(days=30)
 
     try:
-        # 拉最近 30 天有活动的 sessions
-        resp = (
-            client.table("chat_sessions")
-            .select("owner_id, message_count, updated_at")
-            .gte("updated_at", _iso(since))
-            .limit(5000)
+        messages_resp = (
+            client.table("chat_messages")
+            .select("session_id")
+            .gte("created_at", _iso(since))
+            .limit(20_000)
             .execute()
         )
-        rows = resp.data or []
+        message_rows = messages_resp.data or []
+        session_ids = list(
+            {r["session_id"] for r in message_rows if r.get("session_id")}
+        )
+        if not session_ids:
+            return {"users": []}
+        sessions_resp = (
+            client.table("chat_sessions")
+            .select("id, student_id")
+            .in_("id", session_ids)
+            .execute()
+        )
+        uid_by_session = {
+            r["id"]: r["student_id"]
+            for r in (sessions_resp.data or [])
+            if r.get("id") and r.get("student_id")
+        }
     except Exception as exc:
         logger.warning("top users query failed: %s", exc)
         return {"users": []}
 
     agg: dict[str, int] = defaultdict(int)
-    for r in rows:
-        uid = r.get("owner_id")
+    for r in message_rows:
+        uid = uid_by_session.get(r.get("session_id"))
         if uid:
-            agg[uid] += int(r.get("message_count") or 0)
+            agg[uid] += 1
 
     top = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)[:limit]
     if not top:

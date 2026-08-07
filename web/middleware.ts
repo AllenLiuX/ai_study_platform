@@ -1,7 +1,7 @@
 import { type CookieOptions, createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/signup", "/auth/callback"];
+const PUBLIC_PATHS = ["/login", "/signup", "/auth/callback", "/about"];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });

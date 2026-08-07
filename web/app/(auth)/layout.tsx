@@ -24,8 +24,11 @@ export default function AuthLayout({
         <main className="flex flex-1 items-center justify-center pb-16">
           <div className="w-full max-w-md animate-fade-in">{children}</div>
         </main>
-        <footer className="py-6 text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} AI Study Coach · 你的课后 AI 学习伙伴
+        <footer className="flex flex-col items-center gap-2 py-6 text-center text-xs text-muted-foreground">
+          <Link href="/about" className="transition hover:text-primary">
+            了解我们的产品 · 学校 / 机构合作
+          </Link>
+          <span>© {new Date().getFullYear()} AI Study Coach · 你的课后 AI 学习伙伴</span>
         </footer>
       </div>
     </div>

@@ -18,7 +18,8 @@
   "estimated_minutes": 5 | 10 | 15 | 20 | 30,
   "tag": "薄弱 | 复习 | 新学 | 规划",
   "starter_prompt": "<≤80 字,学生第一人称口语>",
-  "knowledge_point_ids": ["..."]   // 可选
+  "knowledge_point_ids": ["..."],  // 可选
+  "roadmap_node_id": "..."         // 可选,来自当前学习规划
 }
 """
 
@@ -84,6 +85,8 @@ SYSTEM_PROMPT = """你是「学习驾驶舱」的 AI 学习教练,为学生设�
   - 自定义老师若无 subject_id,`subject_id=null`,`subject_label` 直接用**该老师的 display_name**
     (例如老师叫"量化MLE导师",subject_label 就写"量化MLE导师")。
 - 若提供了 knowledge_point_ids 候选,可关联 1 个到任务里 (只用池里给的 id,别编造)。
+- 如果下方提供了当前学习规划节点,优先让 1-3 条任务推进这些节点,并填对应 roadmap_node_id。
+  roadmap_node_id 只能使用候选 id；没有匹配时填 null。
 
 输出必须是合法 JSON:
 {
@@ -97,7 +100,8 @@ SYSTEM_PROMPT = """你是「学习驾驶舱」的 AI 学习教练,为学生设�
       "estimated_minutes": 5..30,
       "tag": "薄弱 | 复习 | 新学 | 规划",
       "starter_prompt": "<≤80 字,学生第一人称>",
-      "knowledge_point_ids": ["..."]
+      "knowledge_point_ids": ["..."],
+      "roadmap_node_id": "<当前规划候选节点 id | null>"
     }
   ]
 }
@@ -124,6 +128,9 @@ USER_PROMPT_TEMPLATE = """今天是 {today} ({weekday}),请为该学生生成今
 
 【可关联的薄弱知识点候选 (id: 名称, mastery)】
 {weak_kp_block}
+
+【当前学习规划 (优先转化为今天可执行的一小步)】
+{roadmap_block}
 
 请严格按系统提示输出 JSON。特别注意:
 - 3 条任务都要能说清"这一步怎么帮学习目标『{learning_goal_short}』往前推 1 步"。
@@ -195,6 +202,22 @@ def _format_weak_kps(weak_kps: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _format_roadmap(roadmap: dict | None) -> str:
+    if not roadmap:
+        return "(尚未创建长期学习规划)"
+    lines = [f"- 规划: {roadmap.get('title')} | 目标: {roadmap.get('goal')}"]
+    candidates = []
+    for lane in roadmap.get("lanes") or []:
+        for node in lane.get("nodes") or []:
+            if node.get("status") in {"current", "open", "review"}:
+                candidates.append(
+                    f"- node_id={node.get('id')} | {lane.get('title')} / "
+                    f"{node.get('title')} | 状态={node.get('status')} | "
+                    f"下一步={node.get('next_action') or '未设'}"
+                )
+    return "\n".join(lines + candidates[:10])
+
+
 def _collect_weak_kps(progress: list[dict]) -> list[dict]:
     """把各学科的 weak_points 平铺,按 mastery 升序。"""
     flat: list[dict] = []
@@ -258,6 +281,7 @@ def _validate_task(
     item: dict,
     valid_kp_ids: set[str],
     agent_meta_by_key: dict[str, dict],
+    valid_roadmap_node_ids: set[str],
 ) -> dict | None:
     """校验单条任务,不合法返回 None。
 
@@ -276,6 +300,7 @@ def _validate_task(
         minutes = item.get("estimated_minutes", 15)
         starter_prompt = (item.get("starter_prompt") or "").strip()
         kp_ids = item.get("knowledge_point_ids") or []
+        roadmap_node_id = item.get("roadmap_node_id")
 
         if not title or not description or not starter_prompt:
             return None
@@ -328,6 +353,12 @@ def _validate_task(
             "tag": tag,
             "starter_prompt": starter_prompt[:200],
             "knowledge_point_ids": clean_kps,
+            "roadmap_node_id": (
+                roadmap_node_id
+                if isinstance(roadmap_node_id, str)
+                and roadmap_node_id in valid_roadmap_node_ids
+                else None
+            ),
         }
     except Exception as exc:
         logger.debug("validate task 失败: %s", exc)
@@ -462,11 +493,17 @@ def _build_context(student_id: str) -> dict[str, Any]:
     # ↑ limit 从 8 提到 20 让老师使用频率统计更准
     recent_sessions = repos.list_sessions(student_id, limit=20)
     agent_pool = _build_agent_pool(student_id, recent_sessions)
+    roadmaps = repos.list_learning_roadmaps(student_id)
+    active_roadmap = next(
+        (item for item in roadmaps if item.get("status") == "active"),
+        None,
+    )
     return {
         "profile": profile,
         "progress": progress,
         "recent_sessions": recent_sessions,
         "agent_pool": agent_pool,
+        "active_roadmap": active_roadmap,
     }
 
 
@@ -481,6 +518,7 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
     profile = ctx["profile"]
     recent_sessions = ctx["recent_sessions"]
     agent_pool = ctx["agent_pool"]
+    active_roadmap = ctx["active_roadmap"]
 
     # 判断是否新用户:所有学科 covered_count 都是 0 且从没聊过
     is_new_user = (
@@ -497,6 +535,12 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
 
     weak_kps = _collect_weak_kps(progress)
     valid_kp_ids = {w["knowledge_point_id"] for w in weak_kps if w.get("knowledge_point_id")}
+    valid_roadmap_node_ids = {
+        node.get("id")
+        for lane in (active_roadmap or {}).get("lanes") or []
+        for node in lane.get("nodes") or []
+        if node.get("id")
+    }
 
     # 老师池 → dict for O(1) 查找 + prompt 展示
     agent_meta_by_key = {a["agent_key"]: a for a in agent_pool}
@@ -519,6 +563,7 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
         ),
         progress_block=_format_progress(progress),
         weak_kp_block=_format_weak_kps(weak_kps),
+        roadmap_block=_format_roadmap(active_roadmap),
     )
 
     try:
@@ -535,7 +580,12 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
     valid_tasks: list[dict] = []
     seen_titles: set[str] = set()
     for item in raw_items[:MAX_TASKS]:
-        t = _validate_task(item, valid_kp_ids, agent_meta_by_key)
+        t = _validate_task(
+            item,
+            valid_kp_ids,
+            agent_meta_by_key,
+            valid_roadmap_node_ids,
+        )
         if not t:
             continue
         if t["title"] in seen_titles:
@@ -568,6 +618,9 @@ async def generate_tasks(student_id: str, *, today: date | None = None) -> dict:
             "recent_agent_keys": [
                 a["agent_key"] for a in agent_pool if a["recent_session_count"] > 0
             ],
+            "active_roadmap_id": (
+                active_roadmap.get("id") if active_roadmap else None
+            ),
         },
         "model": llm_out.get("model"),
     }

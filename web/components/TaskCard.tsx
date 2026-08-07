@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Clock, Loader2, Sparkles } from "lucide-react";
+import { ArrowRight, Clock, Loader2, Map, Sparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -103,11 +103,21 @@ export function TaskCard({ task, modelLabel, onClick, busy }: TaskCardProps) {
             </span>
           )}
         </div>
-        {modelLabel && (
-          <div className="flex items-center gap-1 pt-1 text-[10px] text-primary/70">
-            <Sparkles className="h-2.5 w-2.5" />
-            <span className="font-mono">{modelLabel}</span>
-            <span>规划生成</span>
+        {(modelLabel || task.roadmap_node_id) && (
+          <div className="flex flex-wrap items-center gap-2 pt-1 text-[10px] text-primary/70">
+            {modelLabel && (
+              <span className="flex items-center gap-1">
+                <Sparkles className="h-2.5 w-2.5" />
+                <span className="font-mono">{modelLabel}</span>
+                <span>规划生成</span>
+              </span>
+            )}
+            {task.roadmap_node_id && (
+              <span className="flex items-center gap-1">
+                <Map className="h-2.5 w-2.5" />
+                学习路线任务
+              </span>
+            )}
           </div>
         )}
       </CardContent>

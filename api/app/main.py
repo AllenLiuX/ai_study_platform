@@ -19,6 +19,7 @@ from .routes import lecture as lecture_route
 from .routes import materials as materials_route
 from .routes import notes as notes_route
 from .routes import practice as practice_route
+from .routes import roadmaps as roadmaps_route
 from .routes import students as students_route
 
 
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(groups_route.router, prefix="/api")
     app.include_router(admin_route.router, prefix="/api")
     app.include_router(me_route.router, prefix="/api")
+    app.include_router(roadmaps_route.router, prefix="/api")
 
     # 全局兜底: 未捕获异常 (含 postgrest APIError / 数据库表缺失等) 走这里,
     # 返回 JSON + CORS 头, 前端能拿到人话错误 (否则浏览器只显示 "Failed to fetch")

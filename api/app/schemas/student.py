@@ -78,6 +78,7 @@ class DailyTask(BaseModel):
     tag: str
     starter_prompt: str
     knowledge_point_ids: list[str] = Field(default_factory=list)
+    roadmap_node_id: str | None = None
 
 
 class DailyTasksResponse(BaseModel):

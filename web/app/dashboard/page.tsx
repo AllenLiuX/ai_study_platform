@@ -6,8 +6,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/AppHeader";
+import { FeatureShortcuts } from "@/components/FeatureShortcuts";
 import { HeadTeacherCard } from "@/components/HeadTeacherCard";
 import { RecentSessionsCard } from "@/components/RecentSessionsCard";
+import { RoadmapHighlightCard } from "@/components/RoadmapHighlightCard";
 import { StudentHeader } from "@/components/StudentHeader";
 import { SubjectProgressCard } from "@/components/SubjectProgressCard";
 import { TaskCard } from "@/components/TaskCard";
@@ -211,6 +213,14 @@ export default function DashboardPage() {
               </div>
             </section>
 
+            <section className="space-y-3">
+              <SectionTitle
+                title="学习规划"
+                hint="围绕你的目标，把学习拆成清晰可执行的路线"
+              />
+              <RoadmapHighlightCard />
+            </section>
+
             {dashboardQuery.data.profile.learner_type === "free_learner" ? (
               <FreeLearnerSection
                 agentsCount={
@@ -262,6 +272,14 @@ export default function DashboardPage() {
                 </section>
               </>
             )}
+
+            <section className="space-y-3">
+              <SectionTitle
+                title="探索全部功能"
+                hint="规划、听课、群组、练习、资料库、笔记，一站式学习闭环"
+              />
+              <FeatureShortcuts />
+            </section>
 
             <section>
               <RecentSessionsCard

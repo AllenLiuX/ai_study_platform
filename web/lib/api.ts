@@ -20,10 +20,13 @@ import type {
   AdminUserRow,
   FollowUp,
   GeneratedAgentSpec,
+  GenerateRoadmapRequest,
   Group,
+  LearningRoadmap,
   MyPlan,
   PlanTier,
   QuotaExceededDetail,
+  RoadmapNodeStatus,
   GroupDetail,
   GroupMember,
   CreateGroupRequest,
@@ -377,6 +380,47 @@ export const agentsApi = {
       body: JSON.stringify({ description, domains }),
       timeoutMs: 60_000, // LLM 生成可能较慢
     }),
+};
+
+// -----------------------------------------------------------------------------
+// Dynamic learning roadmaps (Phase 9)
+// -----------------------------------------------------------------------------
+export const roadmapsApi = {
+  list: () => request<LearningRoadmap[]>("/api/roadmaps"),
+  get: (roadmapId: string) =>
+    request<LearningRoadmap>(`/api/roadmaps/${roadmapId}`),
+  generate: (payload: GenerateRoadmapRequest) =>
+    request<LearningRoadmap>("/api/roadmaps/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 90_000,
+    }),
+  update: (
+    roadmapId: string,
+    payload: Partial<{
+      title: string;
+      weekly_hours: number;
+      target_date: string | null;
+      agent_key: string | null;
+      status: LearningRoadmap["status"];
+    }>,
+  ) =>
+    request<LearningRoadmap>(`/api/roadmaps/${roadmapId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  updateNode: (
+    roadmapId: string,
+    nodeId: string,
+    payload: { status?: RoadmapNodeStatus; mastery?: number },
+  ) =>
+    request<LearningRoadmap>(
+      `/api/roadmaps/${roadmapId}/nodes/${encodeURIComponent(nodeId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    ),
 };
 
 // -----------------------------------------------------------------------------

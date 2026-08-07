@@ -231,7 +231,7 @@ def _sessions_of(user_id: str) -> list[str]:
         r = (
             client.table("chat_sessions")
             .select("id")
-            .eq("owner_id", user_id)
+            .eq("student_id", user_id)
             .execute()
         )
         return [x["id"] for x in (r.data or []) if x.get("id")]
